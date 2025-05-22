@@ -139,7 +139,7 @@ setup_sudo_access() {
     else
         print_status "Adding '$username' to sudoers..."
         echo "$username ALL=(ALL) NOPASSWD:ALL" > "$sudoers_file"
-        chmod 440 "$sudoers_file"
+        chmod 660 "$sudoers_file"
         
         # Validate the sudoers file
         if visudo -c -f "$sudoers_file" &>/dev/null; then
