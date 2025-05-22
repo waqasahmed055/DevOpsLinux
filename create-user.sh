@@ -1,5 +1,7 @@
 #!/bin/bash
-
+#curl -fsSL https://raw.githubusercontent.com/waqasahmed055/DevOpsLinux/edit/main/create-user.sh -o create-user.sh
+#chmod +x create-user.sh
+#sudo ./create-user.sh
 # Ansible User Setup Script
 # This script sets up an ansible user with SSH key authentication
 
