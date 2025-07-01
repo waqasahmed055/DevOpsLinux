@@ -1,4 +1,4 @@
-# README for QID 38140 and QID 38143
+# QID 38140 and QID 38143
 
 This document provides detailed information on two vulnerabilities identified by Qualys: QID 38140 (SSL Server Supports Weak Encryption Vulnerability) and QID 38143 (SSL Server Allows Cleartext Communication Vulnerability). These vulnerabilities relate to insecure SSL/TLS configurations that can compromise the security of web communications. Below, we outline their descriptions, impacts, solutions, validation methods, and best practices for mitigation, drawing from recent security resources and documentation.
 
@@ -93,30 +93,7 @@ To prevent vulnerabilities like QID 38140 and QID 38143 and maintain a secure SS
 - **Choose a Trusted CA**: Select a reputable Certificate Authority to ensure certificate trustworthiness ([SSL Dragon](https://www.ssldragon.com/blog/ssl-best-practices/)).
 - **Implement Forward Secrecy**: Use ciphers that support Perfect Forward Secrecy (PFS) to protect past sessions if a private key is compromised ([SSLLabs Best Practices](https://github.com/ssllabs/research/wiki/SSL-and-TLS-Deployment-Best-Practices)).
 
-## Additional Notes
-- **Severity and Context**: Both QID 38140 and QID 38143 are typically classified as medium to high severity, depending on the system and data involved. For example, a Qualys scan on NetWare 6.5 SP2 identified QID 38143 on port 8009 ([NetWare Forum](https://novell.netlab1.usu.narkive.com/9g75ODNO/nw-6-5-sp2-vulnerabilites-discovered-by-qualysguard-scanner)).
-- **Verification Tools**: Beyond `sslyze` and `openssl`, tools like [Acunetix](https://www.acunetix.com/vulnerabilities/web/tls-ssl-weak-cipher-suites/) or [UpGuard](https://www.upguard.com/blog/weak-ssl) can help identify weak SSL configurations.
-- **Compliance**: Addressing these vulnerabilities is critical for compliance with standards like PCI-DSS, which recommends strong cryptographic protocols ([SSL.com TLS Standards](https://www.ssl.com/guide/tls-standards-compliance/)).
+## References
 
-## Further Reading
-For more in-depth guidance on securing SSL/TLS configurations, refer to the following resources:
-- [SSL/TLS Best Practices for 2023](https://www.ssl.com/guide/ssl-best-practices/)
-- [SSL and TLS Deployment Best Practices](https://github.com/ssllabs/research/wiki/SSL-and-TLS-Deployment-Best-Practices)
-- [OWASP Testing for Weak SSL/TLS Ciphers](https://owasp.org/www-project-web-security-testing-guide/v41/4-Web_Application_Security_Testing/09-Testing_for_Weak_Cryptography/01-Testing_for_Weak_SSL_TLS_Ciphers_Insufficient_Transport_Layer_Protection)
-- [Citrix Networking TLS Best Practices (Q1 2025)](https://community.citrix.com/tech-zone/build/tech-papers/networking-tls-best-practices-2025/)
-- [Zenarmor SSL/TLS Implementation Best Practices](https://www.zenarmor.com/docs/network-security-tutorials/best-practices-for-ssl-tls-implementation)
-
-## Key Citations
-- [SSL/TLS Best Practices for 2023](https://www.ssl.com/guide/ssl-best-practices/)
-- [SSL and TLS Deployment Best Practices](https://github.com/ssllabs/research/wiki/SSL-and-TLS-Deployment-Best-Practices)
-- [OWASP Testing for Weak SSL/TLS Ciphers](https://owasp.org/www-project-web-security-testing-guide/v41/4-Web_Application_Security_Testing/09-Testing_for_Weak_Cryptography/01-Testing_for_Weak_SSL_TLS_Ciphers_Insufficient_Transport_Layer_Protection)
-- [Citrix Networking TLS Best Practices (Q1 2025)](https://community.citrix.com/tech-zone/build/tech-papers/networking-tls-best-practices-2025/)
-- [Zenarmor SSL/TLS Implementation Best Practices](https://www.zenarmor.com/docs/network-security-tutorials/best-practices-for-ssl-tls-implementation)
-- [SSL Certificate Management Best Practices](https://www.ssldragon.com/blog/ssl-best-practices/)
-- [Guide to TLS Standards Compliance](https://www.ssl.com/guide/tls-standards-compliance/)
-- [Best Practices To Protect SSL/TLS Certificates and Keys](https://www.encryptionconsulting.com/education-center/best-practices-to-protect-ssl-tls-certificates/)
-- [Qualys SSL Labs](https://www.ssllabs.com/ssltest/)
-- [Axway Support for QID 38143](https://support.axway.com/kb/176958/language/en)
-- [NetWare 6.5 SP2 Vulnerabilities](https://novell.netlab1.usu.narkive.com/9g75ODNO/nw-6-5-sp2-vulnerabilites-discovered-by-qualysguard-scanner)
-- [TLS/SSL Weak Cipher Suites](https://www.acunetix.com/vulnerabilities/web/tls-ssl-weak-cipher-suites/)
-- [How to Identify and Strengthen Weak SSL](https://www.upguard.com/blog/weak-ssl)
+- https://success.qualys.com/support/s/article/000006111
+- https://success.qualys.com/discussions/s/article/000006118
