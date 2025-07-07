@@ -19,4 +19,7 @@ sudo tar -xzf apache-tomcat-9.0.107.tar.gz -C /opt/tomcat --strip-components=1
 sudo chown -R tomcat:tomcat /opt/tomcat/
 sudo chmod +x /opt/tomcat/bin/*.sh
 
+#user
+sudo useradd -r -m -U -d /opt/tomcat -s /bin/false tomcat
+
 
