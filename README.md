@@ -22,4 +22,12 @@ sudo chmod +x /opt/tomcat/bin/*.sh
 #user
 sudo useradd -r -m -U -d /opt/tomcat -s /bin/false tomcat
 
+# Install OpenJDK 11
+sudo dnf install java-11-openjdk java-11-openjdk-devel -y
+
+# Or install OpenJDK 17 (recommended)
+sudo dnf install java-17-openjdk java-17-openjdk-devel -y
+
+# Verify Java installation
+java -version
 
