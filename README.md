@@ -10,4 +10,13 @@ WHERE TABLE_TYPE = 'BASE TABLE';
 SELECT name
 FROM sys.tables;
 
+Tomcat installation
+
+wget https://dlcdn.apache.org/tomcat/tomcat-9/v9.0.107/bin/apache-tomcat-9.0.107.tar.gz
+sudo tar -xzf apache-tomcat-9.0.107.tar.gz -C /opt/tomcat --strip-components=1
+
+# Set proper ownership
+sudo chown -R tomcat:tomcat /opt/tomcat/
+sudo chmod +x /opt/tomcat/bin/*.sh
+
 
