@@ -1,0 +1,46 @@
+---
+- name: Collect OS version information from all hosts
+  hosts: all
+  gather_facts: yes
+  tasks:
+    - name: Read /etc/os-release file
+      ansible.builtin.slurp:
+        src: /etc/os-release
+      register: os_release_raw
+      
+    - name: Parse os-release content
+      ansible.builtin.set_fact:
+        os_release_content: "{{ os_release_raw.content | b64decode }}"
+        
+    - name: Display OS information
+      ansible.builtin.debug:
+        msg: |
+          Host: {{ inventory_hostname }}
+          OS Name: {{ ansible_facts['distribution'] }}
+          OS Version: {{ ansible_facts['distribution_version'] }}
+          OS Release: {{ ansible_facts['distribution_release'] }}
+          Architecture: {{ ansible_facts['architecture'] }}
+          Kernel: {{ ansible_facts['kernel'] }}
+          
+          Raw /etc/os-release content:
+          {{ os_release_content }}
+          
+    - name: Create summary report
+      ansible.builtin.lineinfile:
+        path: "./os_inventory_report.txt"
+        line: "{{ inventory_hostname }},{{ ansible_facts['distribution'] }},{{ ansible_facts['distribution_version'] }},{{ ansible_facts['distribution_release'] }},{{ ansible_facts['architecture'] }}"
+        create: yes
+      delegate_to: localhost
+      run_once: false
+
+- name: Generate final report header
+  hosts: localhost
+  connection: local
+  gather_facts: no
+  tasks:
+    - name: Add CSV header to report
+      ansible.builtin.lineinfile:
+        path: "./os_inventory_report.txt"
+        line: "Hostname,Distribution,Version,Release,Architecture"
+        insertbefore: BOF
+        create: yes
