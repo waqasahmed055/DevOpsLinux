@@ -1,16 +1,33 @@
+---
 - name: Fix ICMP redirect issue
-  hosts: linux_servers
+  hosts: all
+  gather_facts: true
   become: yes
+  become_user: ansible
+
+  collections:
+    - ansible.posix
+
+  vars:
+    icmp_settings:
+      - net.ipv4.conf.all.accept_redirects
+      - net.ipv4.conf.default.accept_redirects
+      - net.ipv4.conf.all.secure_redirects
+      - net.ipv4.conf.default.secure_redirects
+
   tasks:
-    - name: Disable ICMP redirect settings per Nexpose
-      ansible.builtin.sysctl:
-        sysctl_file: /etc/sysctl.conf
+    - name: Disable ICMP‐redirect settings immediately
+      ansible.posix.sysctl:
         name: "{{ item }}"
-        value: 0
+        value: "0"
         state: present
         reload: yes
-      loop:
-        - net.ipv4.conf.all.accept_redirects
-        - net.ipv4.conf.default.accept_redirects
-        - net.ipv4.conf.all.secure_redirects
-        - net.ipv4.conf.default.secure_redirect
+      loop: "{{ icmp_settings }}"
+
+    - name: Persist ICMP‐redirect settings in /etc/sysctl.conf
+      ansible.posix.sysctl:
+        name: "{{ item }}"
+        value: "0"
+        state: present
+        sysctl_file: /etc/sysctl.conf
+      loop: "{{ icmp_settings }}"
