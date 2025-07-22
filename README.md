@@ -31,3 +31,4 @@ sudo dnf install java-17-openjdk java-17-openjdk-devel -y
 # Verify Java installation
 java -version
 
+ldapsearch -LLL -H ldap://ad.example.com -D "CN=SyncUser,OU=Service Accounts,DC=example,DC=com" -w '<password>' -b "DC=example,DC=com" "(sAMAccountName=jdoe)" sAMAccountName,distinguishedName
