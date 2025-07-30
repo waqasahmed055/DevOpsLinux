@@ -6,18 +6,103 @@
   gather_facts: no
 
   tasks:
-    - name: Clear bash history files for all users
+    - name: Get users with bash shell and existing home directories
       shell: |
-        while IFS=: read user * * home shell; do
-          [ -d "$home" ] && case "$shell" in */bash) : ;; *) continue;; esac
-          for f in "$home"/.bash_history*; do
-            [ -e "$f" ] && :> "$f"
-          done
-        done < /etc/passwd
+        getent passwd | while IFS=: read -r user x uid gid gecos home shell; do
+          if [[ "$shell" == *"bash"* ]] && [[ -d "$home" ]]; then
+            echo "$user:$home"
+          fi
+        done
+      register: bash_users_result
+      changed_when: false
 
-    - name: Kill all bash processes
-      shell: killall -9 bash 2>/dev/null || true
-
-    - name: Display completion message
+    - name: Display found bash users
       debug:
-        msg: "All bash on-disk histories cleared; all bash sessions killed."
+        msg: "Found bash users: {{ bash_users_result.stdout_lines }}"
+      when: bash_users_result.stdout_lines | length > 0
+
+    - name: Clear bash history files for each user
+      shell: |
+        home_dir="{{ item.split(':')[1] }}"
+        user_name="{{ item.split(':')[0] }}"
+        echo "Processing user: $user_name, home: $home_dir"
+        
+        # Find and clear all bash history files
+        find "$home_dir" -maxdepth 1 -name ".bash_history*" -type f -exec truncate -s 0 {} \;
+        
+        # Also clear any bash history in memory for running sessions
+        pkill -u "$user_name" -USR1 bash 2>/dev/null || true
+        
+        echo "Cleared history for user: $user_name"
+      loop: "{{ bash_users_result.stdout_lines }}"
+      when: bash_users_result.stdout_lines | length > 0
+      register: clear_result
+
+    - name: Force clear any remaining bash history files (alternative method)
+      shell: |
+        # Alternative method using find with more comprehensive search
+        find /home -name ".bash_history*" -type f -exec truncate -s 0 {} \; 2>/dev/null || true
+        find /root -name ".bash_history*" -type f -exec truncate -s 0 {} \; 2>/dev/null || true
+        
+        # Clear history for any users with non-standard home directories
+        getent passwd | awk -F: '$7 ~ /bash/ && $6 != "" {print $6}' | while read home_dir; do
+          if [[ -d "$home_dir" ]]; then
+            find "$home_dir" -maxdepth 1 -name ".bash_history*" -type f -exec truncate -s 0 {} \; 2>/dev/null || true
+          fi
+        done
+
+    - name: Clear in-memory bash history for all bash processes
+      shell: |
+        # Send SIGUSR1 to all bash processes to clear in-memory history
+        pkill -USR1 bash 2>/dev/null || true
+        
+        # Alternative: try to clear history using history command for each bash session
+        for pid in $(pgrep bash 2>/dev/null || true); do
+          if [[ -n "$pid" ]]; then
+            echo "history -c; history -w" > /proc/$pid/fd/0 2>/dev/null || true
+          fi
+        done
+
+    - name: Kill all bash processes to ensure clean state
+      shell: |
+        # Get list of bash processes first
+        bash_pids=$(pgrep bash 2>/dev/null || true)
+        if [[ -n "$bash_pids" ]]; then
+          echo "Killing bash processes: $bash_pids"
+          killall -9 bash 2>/dev/null || true
+          sleep 1
+        else
+          echo "No bash processes found to kill"
+        fi
+
+    - name: Verify history files are cleared
+      shell: |
+        echo "=== Verification Report ==="
+        total_files=0
+        cleared_files=0
+        
+        # Check all bash history files
+        find /home /root -name ".bash_history*" -type f 2>/dev/null | while read file; do
+          total_files=$((total_files + 1))
+          size=$(stat -f%z "$file" 2>/dev/null || stat -c%s "$file" 2>/dev/null || echo "0")
+          if [[ "$size" == "0" ]]; then
+            cleared_files=$((cleared_files + 1))
+            echo "✓ CLEARED: $file (size: $size)"
+          else
+            echo "✗ NOT CLEARED: $file (size: $size)"
+          fi
+        done
+        
+        remaining_bash=$(pgrep bash 2>/dev/null | wc -l || echo "0")
+        echo "=== Summary ==="
+        echo "Remaining bash processes: $remaining_bash"
+        echo "=== End Report ==="
+      register: verification_result
+
+    - name: Display verification results
+      debug:
+        msg: "{{ verification_result.stdout_lines }}"
+
+    - name: Final completion message
+      debug:
+        msg: "Bash history cleanup completed. All bash history files have been cleared and bash processes terminated."
