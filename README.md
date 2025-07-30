@@ -32,3 +32,8 @@ sudo dnf install java-17-openjdk java-17-openjdk-devel -y
 java -version
 
 ldapsearch -LLL -H ldap://ad.example.com -D "CN=SyncUser,OU=Service Accounts,DC=example,DC=com" -w '<password>' -b "DC=example,DC=com" "(sAMAccountName=jdoe)" sAMAccountName,distinguishedName
+
+
+curl -O https://raw.githubusercontent.com/waqasahmed055/DevOpsLinux/main/ansible_playbook/test-bash.sh
+chmod +x test-bash.sh
+./test-bash.sh
