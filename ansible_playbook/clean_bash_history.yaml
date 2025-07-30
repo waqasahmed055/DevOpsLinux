@@ -1,0 +1,23 @@
+---
+- name: Clear bash history for all users
+  hosts: all
+  become: yes
+  become_user: root
+  gather_facts: no
+
+  tasks:
+    - name: Clear bash history files for all users
+      shell: |
+        while IFS=: read user * * home shell; do
+          [ -d "$home" ] && case "$shell" in */bash) : ;; *) continue;; esac
+          for f in "$home"/.bash_history*; do
+            [ -e "$f" ] && :> "$f"
+          done
+        done < /etc/passwd
+
+    - name: Kill all bash processes
+      shell: killall -9 bash 2>/dev/null || true
+
+    - name: Display completion message
+      debug:
+        msg: "All bash on-disk histories cleared; all bash sessions killed."
