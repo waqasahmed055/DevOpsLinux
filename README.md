@@ -35,3 +35,8 @@ ldapsearch -LLL -H ldap://ad.example.com -D "CN=SyncUser,OU=Service Accounts,DC=
 
 
 curl -O https://raw.githubusercontent.com/waqasahmed055/DevOpsLinux/main/ansible_playbook/test-bash.sh && chmod +x test-bash.sh && ./test-bash.sh
+
+
+31/07/2025
+
+https://www.ubuntumint.com/install-apache-tomcat-rhel-8/
