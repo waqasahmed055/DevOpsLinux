@@ -37,6 +37,18 @@ ldapsearch -LLL -H ldap://ad.example.com -D "CN=SyncUser,OU=Service Accounts,DC=
 curl -O https://raw.githubusercontent.com/waqasahmed055/DevOpsLinux/main/ansible_playbook/test-bash.sh && chmod +x test-bash.sh && ./test-bash.sh
 
 
-31/07/2025
+```
+sudo dnf downgrade \
+  glibc-2.28-1* \
+  glibc-common-2.28-1* \
+  glibc-minimal-langpack-2.28-1* \
+  glibc-headers-2.28-1* \
+  glibc-all-langpacks-2.28-1* \
+  glibc-gconv-extra-2.28-1* \
+  glibc-locale-source-2.28-1*
+```
+
+
+
 
 https://www.ubuntumint.com/install-apache-tomcat-rhel-8/
