@@ -52,3 +52,10 @@ sudo dnf downgrade \
 
 
 https://www.ubuntumint.com/install-apache-tomcat-rhel-8/
+
+```
+find . -type f -exec grep -Ei 'rabbitmq.*(user|username|password)|user(name)?\s*=\s*|password\s*=' {} \; -print
+
+find /opt/myapp -type f -exec grep -Ei 'rabbitmq.*(user|username|password)|user(name)?\s*=\s*|password\s*=' {} \; -print
+```
+
