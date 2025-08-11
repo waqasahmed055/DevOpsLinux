@@ -1,28 +1,46 @@
 #!/usr/bin/env bash
-# restart_services.sh - stop all services, wait 30s, start them one-by-one, show dwadmin processes
+# restart_services.sh - stop all services at once, wait 30s, then start them one-by-one
+# Run from any location; this script will cd into /degreeworks.
 
+set -u
+
+BASE_DIR="/degreeworks"
 services=(APIServices Composer Controller RespDashboard TransferEquiv TransferEquivAdmin TransitUI)
 
-# stop all
+cd "$BASE_DIR" || { echo "ERROR: cannot cd to $BASE_DIR"; exit 1; }
+
+echo "Stopping all services (stop scripts dispatched in parallel)..."
+pids=()
 for svc in "${services[@]}"; do
-  echo "----> Stopping ${svc} ..."
-  if [ -x "./${svc}/stop_${svc}.sh" ]; then
-    "./${svc}/stop_${svc}.sh" || echo "Warning: stop_${svc}.sh returned non-zero"
+  stop_sh="./${svc}/stop_${svc}.sh"
+  if [ -x "$stop_sh" ]; then
+    echo "  -> Dispatching $stop_sh"
+    "$stop_sh" &                      # run in background so all stop at "first moment"
+    pids+=($!)
   else
-    echo "Warning: ./$(printf '%s' "$svc")/stop_${svc}.sh not found or not executable"
+    echo "  WARNING: $stop_sh not found or not executable"
   fi
 done
 
-echo "Sleeping 30 seconds..."
+# wait for all background stop scripts to finish
+if [ "${#pids[@]}" -gt 0 ]; then
+  echo "Waiting for stop scripts to finish..."
+  for pid in "${pids[@]}"; do
+    wait "$pid" || echo "  Warning: stop script (pid $pid) exited non-zero"
+  done
+fi
+
+echo "All stop scripts finished. Sleeping 30 seconds..."
 sleep 30
 
-# start sequentially
+echo "Starting services one-by-one..."
 for svc in "${services[@]}"; do
-  echo "----> Starting ${svc} ..."
-  if [ -x "./${svc}/start_${svc}.sh" ]; then
-    "./${svc}/start_${svc}.sh" || echo "Warning: start_${svc}.sh returned non-zero"
+  start_sh="./${svc}/start_${svc}.sh"
+  if [ -x "$start_sh" ]; then
+    echo "  -> Starting $svc via $start_sh"
+    "$start_sh" || echo "  Warning: $start_sh returned non-zero"
   else
-    echo "Warning: ./$(printf '%s' "$svc")/start_${svc}.sh not found or not executable"
+    echo "  WARNING: $start_sh not found or not executable"
   fi
 done
 
