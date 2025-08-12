@@ -39,8 +39,11 @@ sudo firewall-cmd --direct --get-all-rules || true
 
 
 ````
-for p in {9901..9910}; do nc -vz -w5 BACKEND_IP $p 2>&1 | sed "s/^/port $p: /"; done
+
 
 
 ````
+sudo firewall-cmd --permanent --zone=public --add-port=9901-9910/tcp
+sudo firewall-cmd --reload
 
+````
