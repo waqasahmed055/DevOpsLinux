@@ -20,5 +20,10 @@ sudo nft add chain inet filter input '{ type filter hook input priority 0; polic
 sudo nft add rule inet filter input 'tcp dport 9901-9910 ct state new log prefix "FW-LOG-9901-9910: " counter accept'
 sudo nft add rule inet filter input 'tcp dport 9901-9910 ct state new log prefix "FW-LOG-9901-9910: " counter accept'
 
+#####
+
+sudo nft add rule inet filter input 'tcp dport 9901-9910 ct state new log prefix "FW-LOG-9901-9910: " counter accept'
+# watch logs:
+sudo journalctl -k -f | grep FW-LOG-9901-9910
 
 ```
