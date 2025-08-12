@@ -27,3 +27,15 @@ sudo nft add rule inet filter input 'tcp dport 9901-9910 ct state new log prefix
 sudo journalctl -k -f | grep FW-LOG-9901-9910
 
 ```
+
+
+````
+sudo tcpdump -nn -i any 'tcp and host 10.51.18.215 and (dst portrange 9901-9910 or src portrange 9901-9910)' -c 200
+sudo ss -ltnp | egrep '9901|9902|9903|9904|9905|9906|9907|9908|9909|9910' || true
+
+#####
+sudo nft list ruleset | grep -nE 'drop|reject' || true
+sudo firewall-cmd --direct --get-all-rules || true
+
+
+````
