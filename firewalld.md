@@ -39,3 +39,12 @@ sudo firewall-cmd --direct --get-all-rules || true
 
 
 ````
+
+
+```
+
+sudo nft insert rule inet filter input position 0 'tcp dport 9901-9910 ct state new log prefix "TEST-ACCEPT-99xx: " counter accept'
+sudo nft list chain inet filter input
+# look for the TEST-ACCEPT-99xx rule and a counter value > 0 after you retry a request
+
+sudo tcpdump -nn -i any 'tcp and host 10.51.18.215 and (dst portrange 9901-9910 or src portrange 9901-9910)' -c 200
