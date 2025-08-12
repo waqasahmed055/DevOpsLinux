@@ -9,4 +9,7 @@ sudo tcpdump -n -i any 'tcp[tcpflags] & tcp-syn != 0 and dst portrange 9901-9910
 
 sudo nft add rule inet filter input tcp dport 9901-9910 ct state new log prefix "FW-LOG-9901-9910: " counter accept
 
+sudo nft list tables
+sudo nft list chain inet filter input 2>/dev/null || echo "chain-missing"
+
 ```
