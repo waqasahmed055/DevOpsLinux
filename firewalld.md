@@ -48,3 +48,10 @@ sudo nft list chain inet filter input
 # look for the TEST-ACCEPT-99xx rule and a counter value > 0 after you retry a request
 
 sudo tcpdump -nn -i any 'tcp and host 10.51.18.215 and (dst portrange 9901-9910 or src portrange 9901-9910)' -c 200
+
+```
+sudo firewall-cmd --permanent --zone=public --add-port=9901-9910/tcp
+sudo firewall-cmd --reload
+
+
+```
