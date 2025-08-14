@@ -16,4 +16,7 @@ ps aux | grep npcd
 
 ##
 sudo -u nagios /usr/local/nagios/libexec/check_load -w 5,4,3 -c 10,8,6
+##
+df -h /usr/local/nagios/var; df -i /usr/local/nagios/var
+
 ```
