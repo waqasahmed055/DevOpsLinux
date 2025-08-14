@@ -15,8 +15,8 @@ tail -f /usr/local/nagios/var/host-perfdata
 ps aux | grep npcd
 
 ##
-sudo -u nagios /usr/local/nagios/libexec/check_load -w 5,4,3 -c 10,8,6
-##
-df -h /usr/local/nagios/var; df -i /usr/local/nagios/var
+sudo lsof +D /usr/local/nagios/var/spool/xidpe 2>/dev/null | head -n 40
+sudo fuser -v /usr/local/nagios/var/spool/xidpe || true
+
 
 ```
