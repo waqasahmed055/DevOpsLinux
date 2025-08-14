@@ -13,4 +13,7 @@ tail -f /usr/local/nagios/var/service-perfdata
 tail -f /usr/local/nagios/var/host-perfdata
 
 ps aux | grep npcd
+
+##
+sudo -u nagios /usr/local/nagios/libexec/check_load -w 5,4,3 -c 10,8,6
 ```
