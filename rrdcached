@@ -1,0 +1,17 @@
+```
+sudo systemctl edit rrdcached.service
+
+[Service]
+User=nagios
+Group=nagios
+RuntimeDirectory=rrdcached
+RuntimeDirectoryMode=0755
+PIDFile=/run/rrdcached/rrdcached.pid
+
+# Clear then set ExecStart (systemd requires clearing ExecStart before redefining)
+ExecStart=
+ExecStart=/usr/bin/rrdcached -g -j /var/lib/rrdcached/journal -p /run/rrdcached/rrdcached.pid
+
+sudo systemctl daemon-reload
+sudo systemctl restart rrdcached
+sudo systemctl status rrdcached -l
