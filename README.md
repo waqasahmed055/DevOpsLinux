@@ -38,6 +38,12 @@ curl -O https://raw.githubusercontent.com/waqasahmed055/DevOpsLinux/main/ansible
 
 
 ```
+
+
+```
+sudo -u nagios /usr/lib/nagios/plugins/check_ping -H 8.8.8.8 -w 100.0,20% -c 500.0,60% -p 5
+
+```
 sudo dnf downgrade \
   glibc-2.28-1* \
   glibc-common-2.28-1* \
