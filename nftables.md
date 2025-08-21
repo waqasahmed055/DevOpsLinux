@@ -54,3 +54,7 @@ table inet filter {
         type filter hook output priority filter; policy accept;
     }
 }
+```
+echo 'include "/etc/nftables/oci-firewall.nft"' | sudo tee -a /etc/sysconfig/nftables.conf
+sudo systemctl enable --now nftables
+```
