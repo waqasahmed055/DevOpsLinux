@@ -1,4 +1,5 @@
 ```
-# enables all feature flags in 4.0.6 except for khepri_db
-RABBITMQ_FEATURE_FLAGS="delete_ra_cluster_mqtt_node,virtual_host_metadata,stream_single_active_consumer,quorum_queue,classic_mirrored_queue_version,rabbit_mqtt_qos0_queue,implicit_default_bindings,empty_basic_get_metric,'rabbitmq_4.0.0',message_containers,user_limits,queue_master_locator,detailed_queues_endpoint,stream_sac_coordinator_unblock_group,stream_update_config_command,stream_queue,stream_filtering,rabbit_exchange_type_local_random,quorum_queue_non_voters,tracking_records_in_ets,direct_exchange_routing_v2,amqp_address_v1,transient_nonexcl_queues,message_containers_deaths_v2,classic_queue_mirroring,management_metrics_collection,maintenance_mode_status,listener_records_in_ets,feature_flags_v2,global_qos,classic_queue_type_delivery_support,mqtt_v5,ram_node_type,drop_unroutable_metric,restart_streams"
+sudo firewall-cmd --zone=trusted --add-rich-rule='rule family="ipv4" icmp-type name="timestamp-request" drop'
+
+
 ```
