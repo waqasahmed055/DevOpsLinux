@@ -19,14 +19,16 @@ sudo chmod +x /opt/tomcat/bin/*.sh
 ```
 
 ```
-sudo tee /etc/environment << EOF
-JAVA_HOME=/usr/lib/jvm/java-17-openjdk
-CATALINA_HOME=/opt/tomcat
-EOF
+# Set JAVA_HOME for current session
+export JAVA_HOME=/usr/lib/jvm/java-1.8.0-openjdk-1.8.0.432.b06-1.0.1.el7_9.x86_64
+
+# Make it permanent
+echo 'export JAVA_HOME=/usr/lib/jvm/java-1.8.0-openjdk-1.8.0.432.b06-1.0.1.el7_9.x86_64' | sudo tee -a /etc/environment
+echo 'export PATH=$JAVA_HOME/bin:$PATH' | sudo tee -a /etc/environment
 ```
 
 ```
-sudo tee /etc/systemd/system/tomcat.service << EOF
+sudo tee /etc/systemd/system/tomcat.service << 'EOF'
 [Unit]
 Description=Apache Tomcat Web Application Container
 After=network.target
@@ -34,14 +36,14 @@ After=network.target
 [Service]
 Type=forking
 
-Environment="JAVA_HOME=/usr/lib/jvm/java-17-openjdk"
-Environment="CATALINA_HOME=/opt/tomcat"
-Environment="CATALINA_BASE=/opt/tomcat"
-Environment="CATALINA_OPTS=-Xms512M -Xmx1024M -server -XX:+UseG1GC"
-Environment="JAVA_OPTS=-Djava.awt.headless=true -Djava.security.egd=file:/dev/./urandom --add-opens=java.base/java.lang=ALL-UNNAMED --add-opens=java.base/java.io=ALL-UNNAMED --add-opens=java.base/java.util=ALL-UNNAMED --add-opens=java.base/java.util.concurrent=ALL-UNNAMED --add-opens=java.rmi/sun.rmi.transport=ALL-UNNAMED"
+Environment="JAVA_HOME=/usr/lib/jvm/java-1.8.0-openjdk-1.8.0.432.b06-1.0.1.el7_9.x86_64"
+Environment="CATALINA_HOME=/opt/tomcat9"
+Environment="CATALINA_BASE=/opt/tomcat9"
+Environment="CATALINA_OPTS=-Xms512M -Xmx1024M -server -XX:+UseParallelGC"
+Environment="JAVA_OPTS=-Djava.awt.headless=true -Djava.security.egd=file:/dev/./urandom"
 
-ExecStart=/opt/tomcat/bin/startup.sh
-ExecStop=/opt/tomcat/bin/shutdown.sh
+ExecStart=/opt/tomcat9/bin/startup.sh
+ExecStop=/opt/tomcat9/bin/shutdown.sh
 
 User=tomcat
 Group=tomcat
@@ -53,4 +55,8 @@ Restart=always
 WantedBy=multi-user.target
 EOF
 ```
-
+```
+# Ensure tomcat user owns the directory
+sudo chown -R tomcat:tomcat /opt/tomcat9/
+sudo chmod +x /opt/tomcat9/bin/*.sh
+```
