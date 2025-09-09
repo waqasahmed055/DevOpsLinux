@@ -1,4 +1,3 @@
-```
 #!/bin/bash
 
 # Tomcat 9 Installation Script for Oracle Linux/CentOS 7.9
@@ -86,11 +85,6 @@ echo "Final ownership and permission setup..."
 chown -R tomcat:tomcat /opt/tomcat9/
 chmod +x /opt/tomcat9/bin/*.sh
 
-# Configure firewall
-echo "Configuring firewall for port 8080..."
-firewall-cmd --permanent --add-port=8080/tcp
-firewall-cmd --reload
-
 # Reload systemd daemon
 echo "Reloading systemd daemon..."
 systemctl daemon-reload
@@ -117,4 +111,3 @@ echo "  Restart: systemctl restart tomcat"
 echo "  Status:  systemctl status tomcat"
 echo "  Logs:    journalctl -u tomcat -f"
 echo "========================================="
-```
