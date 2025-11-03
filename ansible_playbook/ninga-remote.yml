@@ -15,7 +15,7 @@
 
     - name: Display current installation status
       debug:
-        msg: "NinjaOne agent is {{ 'already installed' if ninja_check.stdout != '' else 'not installed' }}"
+        msg: "NinjaOne agent status - {{ 'already installed' if ninja_check.stdout != '' else 'not installed' }}"
 
     - name: Skip installation if already installed
       meta: end_host
@@ -68,7 +68,7 @@
 
     - name: Display service status
       debug:
-        msg: "NinjaOne agent service is {{ service_status.status.ActiveState }}"
+        msg: "NinjaOne agent service status is {{ service_status.status.ActiveState }}"
 
     - name: Clean up RPM file from remote host
       file:
@@ -82,4 +82,4 @@
 
     - name: Display installation result
       debug:
-        msg: "Successfully installed: {{ final_check.stdout }}"
+        msg: "Successfully installed - {{ final_check.stdout }}"
