@@ -1,0 +1,85 @@
+---
+- name: Install NinjaOne Agent on Linux Servers
+  hosts: all
+  become: yes
+  remote_user: ansible
+  vars:
+    local_rpm_path: "/tmp/NinjaOne-Agent-LandingZone-MainOffice-LINUXSERVER-x86-64.rpm"
+    remote_rpm_path: "/tmp/NinjaOne-Agent-LandingZone-MainOffice-LINUXSERVER-x86-64.rpm"
+    
+  tasks:
+    - name: Check if NinjaOne agent is already installed
+      shell: rpm -qa | grep -i ninjaone || true
+      register: ninja_check
+      changed_when: false
+
+    - name: Display current installation status
+      debug:
+        msg: "NinjaOne agent is {{ 'already installed' if ninja_check.stdout != '' else 'not installed' }}"
+
+    - name: Skip installation if already installed
+      meta: end_host
+      when: ninja_check.stdout != ''
+
+    - name: Copy RPM file from Ansible server to remote host
+      copy:
+        src: "{{ local_rpm_path }}"
+        dest: "{{ remote_rpm_path }}"
+        mode: '0644'
+
+    - name: Verify RPM file exists on remote host
+      stat:
+        path: "{{ remote_rpm_path }}"
+      register: rpm_file
+
+    - name: Fail if RPM file not found on remote host
+      fail:
+        msg: "RPM file not found at {{ remote_rpm_path }}"
+      when: not rpm_file.stat.exists
+
+    - name: Ensure required packages are installed (RHEL/OCI)
+      yum:
+        name:
+          - wget
+          - curl
+        state: present
+
+    - name: Install NinjaOne agent RPM
+      yum:
+        name: "{{ remote_rpm_path }}"
+        state: present
+        disable_gpg_check: yes
+      register: install_result
+
+    - name: Start and enable NinjaOne agent service
+      systemd:
+        name: ninjarmm-agent
+        state: started
+        enabled: yes
+
+    - name: Wait for service to stabilize
+      pause:
+        seconds: 5
+
+    - name: Verify NinjaOne agent service status
+      systemd:
+        name: ninjarmm-agent
+      register: service_status
+
+    - name: Display service status
+      debug:
+        msg: "NinjaOne agent service is {{ service_status.status.ActiveState }}"
+
+    - name: Clean up RPM file from remote host
+      file:
+        path: "{{ remote_rpm_path }}"
+        state: absent
+
+    - name: Verify installation
+      shell: rpm -qa | grep -i ninjaone
+      register: final_check
+      changed_when: false
+
+    - name: Display installation result
+      debug:
+        msg: "Successfully installed: {{ final_check.stdout }}"
