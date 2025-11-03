@@ -1,0 +1,78 @@
+---
+- name: Install NinjaOne Agent on Linux Servers
+  hosts: all
+  become: yes
+  remote_user: ansible
+  vars:
+    ninja_rpm_url: "file://seashare/SeastoreOsa/Installers/NinjaOne/LinuxAgents/NinjaOne-Agent-LandingZone-MainOffice-LINUXSERVER-x86-64.rpm"
+    ninja_rpm_name: "NinjaOne-Agent-LandingZone-MainOffice-LINUXSERVER-x86-64.rpm"
+    local_rpm_path: "/tmp/{{ ninja_rpm_name }}"
+    
+  tasks:
+    - name: Check if NinjaOne agent is already installed
+      shell: rpm -qa | grep -i ninjaone
+      register: ninja_check
+      changed_when: false
+      failed_when: false
+
+    - name: Display current installation status
+      debug:
+        msg: "NinjaOne agent is {{ 'already installed' if ninja_check.rc == 0 else 'not installed' }}"
+
+    - name: Skip installation if already installed
+      meta: end_host
+      when: ninja_check.rc == 0
+
+    - name: Ensure required packages are installed (RHEL/OCI)
+      yum:
+        name:
+          - wget
+          - curl
+        state: present
+
+    - name: Download NinjaOne RPM from file share
+      get_url:
+        url: "{{ ninja_rpm_url }}"
+        dest: "{{ local_rpm_path }}"
+        mode: '0644'
+        validate_certs: no
+
+    - name: Install NinjaOne agent RPM
+      yum:
+        name: "{{ local_rpm_path }}"
+        state: present
+        disable_gpg_check: yes
+      register: install_result
+
+    - name: Start and enable NinjaOne agent service
+      systemd:
+        name: ninjarmm-agent
+        state: started
+        enabled: yes
+
+    - name: Wait for service to stabilize
+      pause:
+        seconds: 5
+
+    - name: Verify NinjaOne agent service status
+      systemd:
+        name: ninjarmm-agent
+      register: service_status
+
+    - name: Display service status
+      debug:
+        msg: "NinjaOne agent service is {{ service_status.status.ActiveState }}"
+
+    - name: Clean up downloaded RPM
+      file:
+        path: "{{ local_rpm_path }}"
+        state: absent
+
+    - name: Verify installation
+      shell: rpm -qa | grep -i ninjaone
+      register: final_check
+      changed_when: false
+
+    - name: Display installation result
+      debug:
+        msg: "Successfully installed: {{ final_check.stdout }}"
