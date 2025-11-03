@@ -1,12 +1,10 @@
 ---
 - name: Install NinjaOne Agent on Linux Servers
-  hosts: all
+  hosts: localhost
   become: yes
-  remote_user: ansible
+  connection: local
   vars:
-    ninja_rpm_url: "file://seashare/SeastoreOsa/Installers/NinjaOne/LinuxAgents/NinjaOne-Agent-LandingZone-MainOffice-LINUXSERVER-x86-64.rpm"
-    ninja_rpm_name: "NinjaOne-Agent-LandingZone-MainOffice-LINUXSERVER-x86-64.rpm"
-    local_rpm_path: "/tmp/{{ ninja_rpm_name }}"
+    ninja_rpm_path: "/tmp/NinjaOne-Agent-LandingZone-MainOffice-LINUXSERVER-x86-64.rpm"
     
   tasks:
     - name: Check if NinjaOne agent is already installed
@@ -23,6 +21,16 @@
       meta: end_host
       when: ninja_check.rc == 0
 
+    - name: Verify RPM file exists
+      stat:
+        path: "{{ ninja_rpm_path }}"
+      register: rpm_file
+
+    - name: Fail if RPM file not found
+      fail:
+        msg: "RPM file not found at {{ ninja_rpm_path }}"
+      when: not rpm_file.stat.exists
+
     - name: Ensure required packages are installed (RHEL/OCI)
       yum:
         name:
@@ -30,16 +38,9 @@
           - curl
         state: present
 
-    - name: Download NinjaOne RPM from file share
-      get_url:
-        url: "{{ ninja_rpm_url }}"
-        dest: "{{ local_rpm_path }}"
-        mode: '0644'
-        validate_certs: no
-
     - name: Install NinjaOne agent RPM
       yum:
-        name: "{{ local_rpm_path }}"
+        name: "{{ ninja_rpm_path }}"
         state: present
         disable_gpg_check: yes
       register: install_result
@@ -62,11 +63,6 @@
     - name: Display service status
       debug:
         msg: "NinjaOne agent service is {{ service_status.status.ActiveState }}"
-
-    - name: Clean up downloaded RPM
-      file:
-        path: "{{ local_rpm_path }}"
-        state: absent
 
     - name: Verify installation
       shell: rpm -qa | grep -i ninjaone
