@@ -1,0 +1,58 @@
+---
+- name: Remove OMI (SCOM) agent from Linux hosts
+  hosts: linux_servers   # adjust to your inventory group or "all"
+  become: true
+  gather_facts: true
+
+  vars:
+    omi_pkg_name: omi
+
+  tasks:
+    - name: Gather installed packages
+      ansible.builtin.package_facts: {}
+
+    - name: Determine if OMI package is installed
+      ansible.builtin.set_fact:
+        omi_installed: >-
+          {{ (ansible_facts.packages is defined)
+             and (omi_pkg_name in ansible_facts.packages) }}
+
+    - name: Show installed OMI version(s) (if present)
+      ansible.builtin.debug:
+        msg: "OMI installed versions: {{ ansible_facts.packages[omi_pkg_name] | map(attribute='version') | list }}"
+      when: omi_installed
+
+    - name: Optional - list OMI related processes (informational)
+      ansible.builtin.shell: "ps aux | egrep '(omi|omiserver|omiclient)' || true"
+      register: omi_procs
+      changed_when: false
+      failed_when: false
+
+    - name: Remove OMI package (dnf/yum-aware)
+      ansible.builtin.package:
+        name: "{{ omi_pkg_name }}"
+        state: absent
+      when: omi_installed
+      register: remove_result
+
+    - name: Stop & disable common OMI service if present (best-effort)
+      ansible.builtin.service:
+        name: omid
+        state: stopped
+        enabled: no
+      when: omi_installed
+      ignore_errors: true
+
+    - name: Verify OMI removal (rpm query)
+      ansible.builtin.command: "rpm -q {{ omi_pkg_name }}"
+      register: verify
+      changed_when: false
+      failed_when: false
+
+    - name: Final report
+      ansible.builtin.debug:
+        msg: >
+          omi_installed={{ omi_installed }},
+          removal_changed={{ remove_result.changed if remove_result is defined else 'n/a' }},
+          verify_stdout='{{ verify.stdout | default('') }}',
+          verify_stderr='{{ verify.stderr | default('') }}'
