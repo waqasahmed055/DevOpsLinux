@@ -1,0 +1,53 @@
+---
+- name: Upgrade Cohesity Agent
+  hosts: cohesity_servers
+  gather_facts: no
+  become: yes
+  
+  tasks:
+    - name: Check current Cohesity agent version
+      shell: rpm -qa | grep cohesity
+      register: current_version
+      ignore_errors: yes
+      
+    - name: Display current version
+      debug:
+        msg: "Current version: {{ current_version.stdout }}"
+    
+    - name: Remove old Cohesity agent packages
+      shell: rpm -qa | grep el-cohesity-agent | xargs rpm -e
+      ignore_errors: yes
+      
+    - name: Upgrade Cohesity agent
+      yum:
+        name: /tmp/el-cohesity-agent-7.3-1.x86_64.rpm
+        state: present
+        disable_gpg_check: yes
+      register: upgrade_result
+      
+    - name: Restart Cohesity agent service
+      systemd:
+        name: cohesity-agent.service
+        state: restarted
+        enabled: yes
+      register: restart_result
+      
+    - name: Wait for service to be active
+      wait_for:
+        timeout: 10
+      
+    - name: Check service status
+      systemd:
+        name: cohesity-agent.service
+      register: service_status
+      
+    - name: Verify new version
+      shell: rpm -qa | grep cohesity
+      register: new_version
+      
+    - name: Display upgrade results
+      debug:
+        msg: 
+          - "Upgrade status: {{ upgrade_result.changed }}"
+          - "New version: {{ new_version.stdout }}"
+          - "Service status: {{ service_status.status.ActiveState }}"
