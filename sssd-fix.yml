@@ -1,0 +1,4 @@
+ldap_opt_timeout = 60
+ldap_network_timeout = 30
+ldap_search_timeout = 90 
+ldap_enumeration_search_timeout = 90
