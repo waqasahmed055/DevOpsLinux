@@ -23,13 +23,13 @@ FAILED_LOG="failed_servers.log"
 
 # Check if sshpass is installed
 if ! command -v sshpass &> /dev/null; then
-    echo -e "${RED}Error: sshpass is not installed. Install it with: sudo apt-get install sshpass${NC}"
+    echo -e "${RED}Error: sshpass is not installed. Install it with: sudo dnf install sshpass${NC}"
     exit 1
 fi
 
 # Check if expect is installed
 if ! command -v expect &> /dev/null; then
-    echo -e "${RED}Error: expect is not installed. Install it with: sudo apt-get install expect${NC}"
+    echo -e "${RED}Error: expect is not installed. Install it with: sudo dnf install expect${NC}"
     exit 1
 fi
 
@@ -47,13 +47,13 @@ change_password() {
     
     # Create expect script for password change
     expect -c "
-        set timeout 30
-        log_user 0
+        set timeout 60
+        log_user 1
         
         spawn ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ${INITIAL_USER}@${server}
         
         expect {
-            \"password:\" {
+            -re \"(password|Password):\" {
                 send \"${INITIAL_PASSWORD}\r\"
             }
             timeout {
@@ -66,67 +66,82 @@ change_password() {
             }
         }
         
+        # Wait for shell prompt - RedHat/OCI format [user@host dir]$ or [user@host dir]#
         expect {
-            \"$\" {
-                send \"sudo passwd ${ANSIBLE_USER}\r\"
+            -re \"\\\\](\\\$|#)\" {
+                # Got prompt, continue
             }
-            \"#\" {
-                send \"sudo passwd ${ANSIBLE_USER}\r\"
+            -re \"(\\\$|#) $\" {
+                # Got simple prompt
             }
             timeout {
-                puts \"Timeout after login\"
+                puts \"Timeout after login - didn't receive prompt\"
                 exit 1
             }
         }
         
+        # Send sudo passwd command
+        send \"sudo passwd ${ANSIBLE_USER}\r\"
+        
+        # Handle sudo password prompt
         expect {
-            \"password:\" {
+            -re \"(password|Password).*:\" {
                 send \"${INITIAL_PASSWORD}\r\"
             }
-            \"password for\" {
-                send \"${INITIAL_PASSWORD}\r\"
-            }
-        }
-        
-        expect {
-            \"New password:\" {
+            -re \"New password:|Enter new UNIX password:\" {
+                # No sudo password needed, already at new password prompt
                 send \"${NEW_ANSIBLE_PASSWORD}\r\"
-            }
-            \"Enter new UNIX password:\" {
-                send \"${NEW_ANSIBLE_PASSWORD}\r\"
-            }
-        }
-        
-        expect {
-            \"Retype new password:\" {
-                send \"${NEW_ANSIBLE_PASSWORD}\r\"
-            }
-            \"Retype new UNIX password:\" {
-                send \"${NEW_ANSIBLE_PASSWORD}\r\"
-            }
-        }
-        
-        expect {
-            \"successfully\" {
-                puts \"SUCCESS\"
-                send \"exit\r\"
-                expect eof
-                exit 0
-            }
-            \"updated successfully\" {
-                puts \"SUCCESS\"
-                send \"exit\r\"
-                expect eof
-                exit 0
+                exp_continue
             }
             timeout {
-                puts \"Password change may have failed\"
-                send \"exit\r\"
-                expect eof
+                puts \"Timeout waiting for sudo password\"
                 exit 1
             }
         }
-    " 2>/dev/null
+        
+        # Wait for new password prompt
+        expect {
+            -re \"New password:|Enter new UNIX password:\" {
+                send \"${NEW_ANSIBLE_PASSWORD}\r\"
+            }
+            timeout {
+                puts \"Timeout waiting for new password prompt\"
+                exit 1
+            }
+        }
+        
+        # Wait for retype password prompt
+        expect {
+            -re \"Retype.*password:|Retype new UNIX password:|Retype new password:\" {
+                send \"${NEW_ANSIBLE_PASSWORD}\r\"
+            }
+            timeout {
+                puts \"Timeout waiting for retype prompt\"
+                exit 1
+            }
+        }
+        
+        # Wait for success message or prompt return
+        expect {
+            -re \"successfully|updated successfully|passwd: all authentication tokens updated successfully\" {
+                puts \"SUCCESS\"
+            }
+            -re \"\\\\](\\\$|#)\" {
+                puts \"SUCCESS\"
+            }
+            -re \"(\\\$|#) $\" {
+                puts \"SUCCESS\"
+            }
+            timeout {
+                puts \"Timeout waiting for completion\"
+                exit 1
+            }
+        }
+        
+        send \"exit\r\"
+        expect eof
+        exit 0
+    "
     
     return $?
 }
