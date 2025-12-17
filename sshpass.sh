@@ -1,35 +1,29 @@
 #!/usr/bin/env bash
 # =========================================================
-# Bulk reset ansible password on RHEL servers
+# Fully non-interactive password reset for ansible user
 # =========================================================
 
 set -euo pipefail
 
 # ===================== VARIABLES =========================
-# Admin user used to connect expired ansible servers
 ADMIN_USER="server-a"
 ADMIN_PASS="AdminUserPasswordHere"
 
-# User whose password will be reset
 ANSIBLE_USER="ansible"
 NEW_PASS="abc@123"
 
-# Server list (host or host:port)
 SERVERS=(
-  "server1.example.com"
-  "10.0.0.5"
-  "server3.internal:2222"
+  "10.50.54.9"
+  "10.50.54.10"
 )
 
-# SSH options
 SSH_OPTS="-o StrictHostKeyChecking=no \
           -o UserKnownHostsFile=/dev/null \
           -o ConnectTimeout=10"
 
 # =========================================================
 
-command -v ssh >/dev/null || { echo "ssh not found"; exit 1; }
-command -v sshpass >/dev/null || { echo "sshpass required"; exit 1; }
+command -v sshpass >/dev/null || { echo "sshpass is required"; exit 1; }
 
 log() {
   echo "$(date '+%F %T') $*"
@@ -49,14 +43,15 @@ change_password() {
   local srv="$1"
   parse_host "$srv"
 
-  log "[$srv] Changing password..."
+  log "[$srv] Resetting ansible password"
 
-  ssh ${SSH_OPTS} -p "$PORT" "${ADMIN_USER}@${HOST}" "sudo -S bash -c '
-    echo \"${ANSIBLE_USER}:${NEW_PASS}\" | chpasswd
-    usermod -U ${ANSIBLE_USER} 2>/dev/null || true
-    chage -d 0 ${ANSIBLE_USER} 2>/dev/null || true
-    echo OK
-  '" <<< "$ADMIN_PASS" >/dev/null
+  sshpass -p "$ADMIN_PASS" ssh ${SSH_OPTS} -p "$PORT" \
+    "${ADMIN_USER}@${HOST}" \
+    "echo '$ADMIN_PASS' | sudo -S bash -c '
+      echo \"${ANSIBLE_USER}:${NEW_PASS}\" | chpasswd
+      usermod -U ${ANSIBLE_USER} 2>/dev/null || true
+      chage -d 0 ${ANSIBLE_USER} 2>/dev/null || true
+    '" >/dev/null
 }
 
 verify_ssh() {
@@ -69,25 +64,24 @@ verify_ssh() {
 
 # ===================== MAIN ==============================
 
-declare -A CHANGE_STATUS
-declare -A VERIFY_STATUS
+declare -A CHANGE VERIFY
 
 for server in "${SERVERS[@]}"; do
   log "Processing $server"
 
   if change_password "$server"; then
-    CHANGE_STATUS["$server"]="PASSWORD_RESET"
+    CHANGE["$server"]="RESET_OK"
   else
-    CHANGE_STATUS["$server"]="FAILED"
+    CHANGE["$server"]="FAILED"
     continue
   fi
 
   sleep 1
 
   if verify_ssh "$server"; then
-    VERIFY_STATUS["$server"]="SSH_OK"
+    VERIFY["$server"]="SSH_OK"
   else
-    VERIFY_STATUS["$server"]="SSH_FAILED"
+    VERIFY["$server"]="SSH_FAILED"
   fi
 done
 
@@ -95,19 +89,19 @@ done
 
 echo
 echo "==================== SUMMARY ===================="
-printf "%-30s %-20s %-15s\n" "SERVER" "PASSWORD" "SSH VERIFY"
+printf "%-20s %-15s %-10s\n" "SERVER" "PASSWORD" "SSH"
 echo "------------------------------------------------"
 for s in "${SERVERS[@]}"; do
-  printf "%-30s %-20s %-15s\n" \
+  printf "%-20s %-15s %-10s\n" \
     "$s" \
-    "${CHANGE_STATUS[$s]:-N/A}" \
-    "${VERIFY_STATUS[$s]:-N/A}"
+    "${CHANGE[$s]:-N/A}" \
+    "${VERIFY[$s]:-N/A}"
 done
 echo "================================================"
 
 # Exit non-zero if any failure
 for s in "${SERVERS[@]}"; do
-  if [[ "${CHANGE_STATUS[$s]}" != "PASSWORD_RESET" || "${VERIFY_STATUS[$s]}" != "SSH_OK" ]]; then
+  if [[ "${CHANGE[$s]}" != "RESET_OK" || "${VERIFY[$s]}" != "SSH_OK" ]]; then
     exit 1
   fi
 done
