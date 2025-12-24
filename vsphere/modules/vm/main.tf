@@ -1,83 +1,75 @@
-# modules/vm/main.tf
+provider "vsphere" {
+  user           = "${var.vsphere_user}"
+  password       = "${var.vsphere_password}"
+  vsphere_server = "${var.vsphere_server}"
 
-# Data source to get datacenter
+  # if you have a self-signed cert
+  allow_unverified_ssl = true
+}
+
 data "vsphere_datacenter" "dc" {
-  name = var.datacenter
+  name = "Prod DC"
 }
 
-# Data source to get datastore
 data "vsphere_datastore" "datastore" {
-  name          = var.datastore
-  datacenter_id = data.vsphere_datacenter.dc.id
+  name          = "prod_datastore"
+  datacenter_id = "${data.vsphere_datacenter.dc.id}"
 }
 
-# Data source to get compute cluster
 data "vsphere_compute_cluster" "cluster" {
-  name          = var.cluster
-  datacenter_id = data.vsphere_datacenter.dc.id
+  name          = "Prod Cluster"
+  datacenter_id = "${data.vsphere_datacenter.dc.id}"
 }
 
-# Data source to get network
 data "vsphere_network" "network" {
-  name          = var.network_name
-  datacenter_id = data.vsphere_datacenter.dc.id
+  name          = "VM Network"
+  datacenter_id = "${data.vsphere_datacenter.dc.id}"
 }
 
-# Data source to get template
 data "vsphere_virtual_machine" "template" {
-  name          = var.template_name
-  datacenter_id = data.vsphere_datacenter.dc.id
+  name          = "CentOS7 Template"
+  datacenter_id = "${data.vsphere_datacenter.dc.id}"
 }
 
-# Create the Virtual Machine
 resource "vsphere_virtual_machine" "vm" {
-  name             = "${var.server_name}-${var.environment}"
-  resource_pool_id = data.vsphere_compute_cluster.cluster.resource_pool_id
-  datastore_id     = data.vsphere_datastore.datastore.id
-  folder           = var.vm_folder
+  name             = "CentOS7 Clone"
+  resource_pool_id = "${data.vsphere_compute_cluster.cluster.resource_pool_id}"
+  datastore_id     = "${data.vsphere_datastore.datastore.id}"
 
-  num_cpus = var.num_cpus
-  memory   = var.memory
-  guest_id = data.vsphere_virtual_machine.template.guest_id
+  num_cpus = 2
+  memory   = 1024
+  guest_id = "${data.vsphere_virtual_machine.template.guest_id}"
 
-  # Network interface
+  scsi_type = "${data.vsphere_virtual_machine.template.scsi_type}"
+
   network_interface {
-    network_id   = data.vsphere_network.network.id
-    adapter_type = data.vsphere_virtual_machine.template.network_interface_types[0]
+    network_id   = "${data.vsphere_network.network.id}"
+    adapter_type = "${data.vsphere_virtual_machine.template.network_interface_types[0]}"
   }
 
-  # Disk configuration
   disk {
     label            = "disk0"
-    size             = var.disk_size != null ? var.disk_size : data.vsphere_virtual_machine.template.disks[0].size
-    thin_provisioned = var.thin_provisioned
+    size             = "${data.vsphere_virtual_machine.template.disks.0.size}"
+    eagerly_scrub    = "${data.vsphere_virtual_machine.template.disks.0.eagerly_scrub}"
+    thin_provisioned = "${data.vsphere_virtual_machine.template.disks.0.thin_provisioned}"
   }
 
-  # Clone from template
   clone {
-    template_uuid = data.vsphere_virtual_machine.template.id
-
-    customize {
-      linux_options {
-        host_name = "${var.server_name}-${var.environment}"
-        domain    = var.domain
-      }
-
-      network_interface {
-        ipv4_address = var.ipv4_address
-        ipv4_netmask = var.ipv4_netmask
-      }
-
-      ipv4_gateway    = var.ipv4_gateway
-      dns_server_list = var.dns_servers
-    }
+   template_uuid = "${data.vsphere_virtual_machine.template.id}"
+   customize {
+     linux_options {
+       host_name = "centos7clone"
+       domain = ".local"
+   }
+  
+   network_interface { 
+     ipv4_address = "10.211.55.201"
+     ipv4_netmask = 24 
+   }
+  
+   ipv4_gateway = "10.211.55.1"
   }
 
-  # Wait for guest operations
-  wait_for_guest_net_timeout  = var.wait_for_guest_net_timeout
-  wait_for_guest_ip_timeout   = var.wait_for_guest_ip_timeout
-  wait_for_guest_net_routable = var.wait_for_guest_net_routable
 
-  # Tags
-  tags = var.tags
+}
 }
