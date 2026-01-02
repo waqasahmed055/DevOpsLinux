@@ -1,0 +1,58 @@
+---
+- name: Configure password policy for ansible user
+  hosts: all
+  become: yes
+  become_user: root
+  become_method: sudo
+  
+  tasks:
+    - name: Ensure ansible user exists
+      ansible.builtin.user:
+        name: ansible
+        state: present
+      register: user_check
+      
+    - name: Set password to never expire for ansible user
+      ansible.builtin.command:
+        cmd: chage -M -1 ansible
+      when: user_check is succeeded
+      changed_when: true
+      
+    - name: Verify password expiry settings
+      ansible.builtin.command:
+        cmd: chage -l ansible
+      register: password_status
+      changed_when: false
+      
+    - name: Display password policy for ansible user
+      ansible.builtin.debug:
+        var: password_status.stdout_lines
+        
+    - name: Remove password expiry warning period (optional)
+      ansible.builtin.command:
+        cmd: chage -W -1 ansible
+      changed_when: true
+      
+    - name: Remove minimum password age (optional)
+      ansible.builtin.command:
+        cmd: chage -m 0 ansible
+      changed_when: true
+      
+    - name: Remove account expiration date (optional)
+      ansible.builtin.command:
+        cmd: chage -E -1 ansible
+      changed_when: true
+      
+    - name: Final verification of all settings
+      ansible.builtin.command:
+        cmd: chage -l ansible
+      register: final_status
+      changed_when: false
+      
+    - name: Display final password policy
+      ansible.builtin.debug:
+        msg: "Password policy updated successfully for ansible user"
+        
+    - name: Show final settings
+      ansible.builtin.debug:
+        var: final_status.stdout_lines
