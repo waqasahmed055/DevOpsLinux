@@ -5,25 +5,47 @@
   tasks:
     
     - name: Display OS Information for All Servers
-      debug:
+      ansible.builtin.debug:
         msg: |
           Server: {{ inventory_hostname }}
           OS: {{ ansible_distribution }} {{ ansible_distribution_version }}
           Major Version: {{ ansible_distribution_major_version }}
           Architecture: {{ ansible_architecture }}
 
-    - name: Create OS Summary Report
-      lineinfile:
-        path: /tmp/os_version_report.txt
-        line: "{{ inventory_hostname }},{{ ansible_distribution }},{{ ansible_distribution_version }},{{ ansible_distribution_major_version }},{{ ansible_architecture }}"
-        create: yes
-      delegate_to: localhost
+    - name: Collect OS information
+      ansible.builtin.set_fact:
+        os_info: "{{ inventory_hostname }},{{ ansible_distribution }},{{ ansible_distribution_version }},{{ ansible_distribution_major_version }},{{ ansible_architecture }}"
 
-- name: Display Summary
+    - name: Save OS info to local file
+      ansible.builtin.lineinfile:
+        path: "/tmp/os_version_report.csv"
+        line: "{{ os_info }}"
+        create: yes
+        state: present
+      delegate_to: localhost
+      become: no
+
+- name: Create Report Header and Display Summary
   hosts: localhost
   gather_facts: no
   tasks:
     
+    - name: Add CSV header to report
+      ansible.builtin.lineinfile:
+        path: "/tmp/os_version_report.csv"
+        line: "Hostname,Distribution,Version,Major_Version,Architecture"
+        insertbefore: BOF
+        state: present
+
+    - name: Display report contents
+      ansible.builtin.command: cat /tmp/os_version_report.csv
+      register: report_output
+      changed_when: false
+
+    - name: Show the report
+      ansible.builtin.debug:
+        msg: "{{ report_output.stdout_lines }}"
+
     - name: Show report location
-      debug:
-        msg: "OS version report saved to /tmp/os_version_report.txt"
+      ansible.builtin.debug:
+        msg: "OS version report saved to /tmp/os_version_report.csv"
