@@ -1,0 +1,45 @@
+---
+- name: Fix ICMP Redirection Enabled Issue
+  hosts: all
+  become: yes
+  vars:
+    sysctl_settings:
+      - { key: "net.ipv4.conf.all.accept_redirects", value: "0" }
+      - { key: "net.ipv4.conf.default.accept_redirects", value: "0" }
+      - { key: "net.ipv4.conf.all.secure_redirects", value: "0" }
+      - { key: "net.ipv4.conf.default.secure_redirects", value: "0" }
+
+  tasks:
+    - name: Apply sysctl settings immediately
+      ansible.posix.sysctl:
+        name: "{{ item.key }}"
+        value: "{{ item.value }}"
+        state: present
+        reload: yes
+        sysctl_set: yes
+      loop: "{{ sysctl_settings }}"
+      loop_control:
+        label: "{{ item.key }}"
+
+    - name: Ensure settings are persistent in /etc/sysctl.conf
+      ansible.posix.sysctl:
+        name: "{{ item.key }}"
+        value: "{{ item.value }}"
+        state: present
+        sysctl_file: /etc/sysctl.conf
+        reload: yes
+      loop: "{{ sysctl_settings }}"
+      loop_control:
+        label: "{{ item.key }}"
+
+    - name: Verify current sysctl settings
+      ansible.builtin.command: "sysctl {{ item.key }}"
+      register: sysctl_verify
+      loop: "{{ sysctl_settings }}"
+      loop_control:
+        label: "{{ item.key }}"
+      changed_when: false
+
+    - name: Display verification results
+      ansible.builtin.debug:
+        msg: "{{ sysctl_verify.results | map(attribute='stdout') | list }}"
