@@ -29,7 +29,7 @@ Direct integration allows RHEL systems to authenticate users against Microsoft E
    - Verify with `getent passwd <entra-user>` and attempt SSH login.
 
 **Reference Docs**:
-- Red Hat: [Login to RHEL using Microsoft Entra ID](https://access.redhat.com/solutions/7076188).
+- Red Hat: [Connecting RHEL systems directly to AD using SSSD](https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/8/html/integrating_rhel_systems_directly_with_windows_active_directory/connecting-rhel-systems-directly-to-ad-using-sssd_integrating-rhel-systems-directly-with-active-directory).
 - Microsoft: [Join RHEL VM to Entra Domain Services](https://learn.microsoft.com/en-us/entra/identity/domain-services/join-rhel-linux-vm); [Microsoft SSO for Linux](https://learn.microsoft.com/en-us/entra/identity/devices/sso-linux).
 
 ### Considerations
