@@ -1,0 +1,117 @@
+---
+- name: Check OS Version and IP on All Servers
+  hosts: all
+  gather_facts: yes
+  tasks:
+    
+    - name: Display OS Information for All Servers
+      ansible.builtin.debug:
+        msg: |
+          Server: {{ inventory_hostname }}
+          IP: {{ ansible_default_ipv4.address | default('N/A') }}
+          OS: {{ ansible_distribution }} {{ ansible_distribution_version }}
+          Major Version: {{ ansible_distribution_major_version }}
+          Architecture: {{ ansible_architecture }}
+    
+    - name: Collect OS and IP information
+      ansible.builtin.set_fact:
+        os_info: "{{ inventory_hostname }},{{ ansible_default_ipv4.address | default('N/A') }},{{ ansible_distribution }},{{ ansible_distribution_version }},{{ ansible_distribution_major_version }},{{ ansible_architecture }}"
+    
+    - name: Save OS info to local file
+      ansible.builtin.lineinfile:
+        path: "/tmp/os_version_report.csv"
+        line: "{{ os_info }}"
+        create: yes
+        state: present
+      delegate_to: localhost
+      become: no
+
+- name: Create Report Header and Generate Spreadsheet
+  hosts: localhost
+  gather_facts: no
+  tasks:
+    
+    - name: Add CSV header to report
+      ansible.builtin.lineinfile:
+        path: "/tmp/os_version_report.csv"
+        line: "Hostname,IP_Address,Distribution,Version,Major_Version,Architecture"
+        insertbefore: BOF
+        state: present
+    
+    - name: Display report contents
+      ansible.builtin.command: cat /tmp/os_version_report.csv
+      register: report_output
+      changed_when: false
+    
+    - name: Show the report
+      ansible.builtin.debug:
+        msg: "{{ report_output.stdout_lines }}"
+    
+    - name: Install required Python package for Excel generation
+      ansible.builtin.pip:
+        name: openpyxl
+        state: present
+      ignore_errors: yes
+    
+    - name: Convert CSV to Excel spreadsheet
+      ansible.builtin.script: |
+        #!/usr/bin/env python3
+        import csv
+        try:
+            from openpyxl import Workbook
+            from openpyxl.styles import Font, PatternFill
+            
+            # Read CSV
+            wb = Workbook()
+            ws = wb.active
+            ws.title = "OS Inventory"
+            
+            with open('/tmp/os_version_report.csv', 'r') as f:
+                reader = csv.reader(f)
+                for row in reader:
+                    ws.append(row)
+            
+            # Format header
+            header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
+            header_font = Font(bold=True, color="FFFFFF")
+            
+            for cell in ws[1]:
+                cell.fill = header_fill
+                cell.font = header_font
+            
+            # Auto-adjust column widths
+            for column in ws.columns:
+                max_length = 0
+                column_letter = column[0].column_letter
+                for cell in column:
+                    try:
+                        if len(str(cell.value)) > max_length:
+                            max_length = len(cell.value)
+                    except:
+                        pass
+                adjusted_width = min(max_length + 2, 50)
+                ws.column_dimensions[column_letter].width = adjusted_width
+            
+            # Save Excel file
+            wb.save('/tmp/os_version_report.xlsx')
+            print("Excel file created successfully")
+        except ImportError:
+            print("openpyxl not available, Excel file not created")
+        except Exception as e:
+            print(f"Error creating Excel file: {e}")
+      args:
+        executable: python3
+      register: excel_result
+      changed_when: false
+      ignore_errors: yes
+    
+    - name: Show Excel conversion result
+      ansible.builtin.debug:
+        msg: "{{ excel_result.stdout_lines }}"
+      when: excel_result.stdout_lines is defined
+    
+    - name: Show report locations
+      ansible.builtin.debug:
+        msg: 
+          - "CSV report saved to: /tmp/os_version_report.csv"
+          - "Excel report saved to: /tmp/os_version_report.xlsx"
