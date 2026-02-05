@@ -7,7 +7,7 @@ $COMPARTMENT_ID = "ocid1.compartment.oc1..aaaaaaaant6nhu65dwfoecobudeid5gqby4fv3
 Write-Host "Getting instances from compartment..." -ForegroundColor Cyan
 
 # Get instances
-$instances = (oci compute instance list --compartment-id $COMPARTMENT_ID --all --profile $PROFILE --config-file "$CONFIG_FILE" --auth $AUTH_TYPE | ConvertFrom-Json).data
+$instances = (oci compute instance list --compartment-id $COMPARTMENT_ID --all --lifecycle-state RUNNING --profile $PROFILE --config-file "$CONFIG_FILE" --auth $AUTH_TYPE | ConvertFrom-Json).data
 
 Write-Host "Found $($instances.Count) instances. Getting details..." -ForegroundColor Green
 
