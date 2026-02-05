@@ -24,6 +24,12 @@ foreach ($inst in $instances) {
     $imageId = if ($inst.'source-details'.'image-id') { $inst.'source-details'.'image-id' } else { $inst.'image-id' }
     $image = (oci compute image get --image-id $imageId --profile $PROFILE --config-file "$CONFIG_FILE" --auth $AUTH_TYPE | ConvertFrom-Json).data
     
+    # Skip Windows servers
+    if ($image.'operating-system' -like '*Windows*') {
+        Write-Host "Skipping Windows server: $($inst.'display-name')" -ForegroundColor Gray
+        continue
+    }
+    
     $report += [PSCustomObject]@{
         'Name'       = $inst.'display-name'
         'State'      = $inst.'lifecycle-state'
