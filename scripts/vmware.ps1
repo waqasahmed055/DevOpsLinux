@@ -1,15 +1,21 @@
 Get-VM |
-  Where-Object {
+Where-Object {
     $_.PowerState -eq 'PoweredOn' -and
-    (
-      ($_.ExtensionData.Guest.GuestFamily -eq 'linuxGuest') -or
-      ($_.Guest.OSFullName -and $_.Guest.OSFullName -match 'Linux|Ubuntu|CentOS|Debian|Red Hat|SUSE|Oracle')
-    )
-  } |
-  Select-Object `
-    @{Name='Name';Expression={$_.Name}}, `
-    @{Name='PowerState';Expression={$_.PowerState}}, `
-    @{Name='OS';Expression={ if ($_.Guest.OSFullName) { $_.Guest.OSFullName } else { $_.ExtensionData.Guest.GuestFullName } }}, `
-    @{Name='GuestId';Expression={ $_.ExtensionData.Guest.GuestId }}, `
-    @{Name='IP';Expression={ ($_.Guest.IPAddress -join ', ') }} |
-  Export-Csv -Path .\linux_vms.csv -NoTypeInformation -Encoding UTF8
+    $_.ExtensionData.Guest.GuestFamily -eq 'linuxGuest'
+} |
+Select-Object `
+    @{Name='VMName'; Expression = { $_.Name }}, `
+    @{Name='OS'; Expression = {
+        if ($_.Guest.OSFullName -match 'Red Hat')     { ($_.Guest.OSFullName -replace 'Red Hat.*?(\d+(\.\d+)?)','$1'; "RedHat $($Matches[1])") }
+        elseif ($_.Guest.OSFullName -match 'Ubuntu')  { ($_.Guest.OSFullName -replace 'Ubuntu ','') -replace ' LTS',''; "Ubuntu $($Matches[0])" }
+        elseif ($_.Guest.OSFullName -match 'CentOS')  { ($_.Guest.OSFullName -replace 'CentOS ','') }
+        elseif ($_.Guest.OSFullName -match 'Oracle')  { ($_.Guest.OSFullName -replace 'Oracle Linux ','Oracle ') }
+        elseif ($_.Guest.OSFullName -match 'SUSE')    { ($_.Guest.OSFullName -replace 'SUSE Linux Enterprise ','SLES ') }
+        else { $_.ExtensionData.Guest.GuestId }
+    }}, `
+    @{Name='IP'; Expression = {
+        ($_.Guest.IPAddress |
+            Where-Object { $_ -match '^\d{1,3}(\.\d{1,3}){3}$' }) -join ', '
+    }}, `
+    @{Name='PowerState'; Expression = { $_.PowerState }} |
+Export-Csv -Path .\linux_vms_ipv4_short_os.csv -NoTypeInformation -Encoding UTF8
