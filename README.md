@@ -5,6 +5,10 @@ testparm -s | awk -F'[][]' '/\[/{print $2}' | grep -v '^global$'
 
 testparm -s 2>/dev/null | awk '/path/ && $3 !~ /share\/?$/ {for(i=3;i<NF;++i)printf$i" ";print$i}'
 
+echo "ShareName" > shares.csv
+testparm -s | awk -F'[][]' '/\[/{print $2}' | grep -v '^global$' >> shares.csv
+
+
 ```
 
 
