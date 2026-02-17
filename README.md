@@ -1,3 +1,15 @@
+```
+# show parsed smb.conf and extract section names (excluding [global])
+testparm -s | awk -F'[][]' '/\[/{print $2}' | grep -v '^global$'
+
+
+testparm -s 2>/dev/null | awk '/path/ && $3 !~ /share\/?$/ {for(i=3;i<NF;++i)printf$i" ";print$i}'
+
+```
+
+
+
+
 # DevOpsLinux
 Work related to Linux DevOps
 
