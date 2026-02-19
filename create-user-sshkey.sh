@@ -32,10 +32,10 @@ print_error() {
 }
 
 # ============================================================
-# REPLACE THE KEY BELOW with your actual public key
-# Copy it from: /home/ansible/.ssh/id_rsa.pub  (or id_ed25519.pub)
+# REPLACE THIS WITH YOUR ACTUAL CONTROLLER'S PUBLIC KEY
+# Run: cat /home/ansible/.ssh/id_rsa.pub  (on the controller)
 # ============================================================
-ANSIBLE_PUBLIC_KEY="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI REPLACE_THIS_WITH_YOUR_ACTUAL_PUBLIC_KEY ansible@controlnode"
+CONTROLLER_PUBLIC_KEY="ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC0placeholder+YourActualControllerPublicKeyHere+ReplaceThisWithTheOutputOf+CatSlashHomeSlashAnsibleSlashDotSshSlashIdRsaDotPub+OnYourControllerNode ansible@controller"
 
 # Check if script is run as root
 check_root() {
@@ -65,7 +65,7 @@ file_exists() {
 # Create ansible user
 create_ansible_user() {
     local username="ansible"
-    
+
     if user_exists "$username"; then
         print_warning "User '$username' already exists, skipping user creation"
     else
@@ -83,7 +83,7 @@ create_ansible_user() {
 # Set password for ansible user
 set_ansible_password() {
     local username="ansible"
-    
+
     print_status "Setting password for user '$username'..."
     if echo "ansible:UneeD2024" | chpasswd; then
         print_success "Password set for user '$username'"
@@ -98,12 +98,12 @@ create_ssh_directory() {
     local username="ansible"
     local home_dir="/home/$username"
     local ssh_dir="$home_dir/.ssh"
-    
+
     if ! directory_exists "$home_dir"; then
         print_error "Home directory '$home_dir' does not exist"
         exit 1
     fi
-    
+
     if directory_exists "$ssh_dir"; then
         print_warning ".ssh directory already exists at '$ssh_dir'"
     else
@@ -116,14 +116,14 @@ create_ssh_directory() {
             exit 1
         fi
     fi
-    
-    # .ssh dir: owned by ansible, rwx------ (700)
+
+    print_status "Setting ownership and permissions for .ssh directory..."
     chown "$username:$username" "$ssh_dir"
     chmod 700 "$ssh_dir"
-    print_success "Set ownership and permissions on .ssh directory (700)"
+    print_success "Set proper ownership and permissions for .ssh directory"
 }
 
-# Setup authorized_keys with hardcoded public key
+# Copy controller's public key to authorized_keys
 setup_authorized_keys() {
     local username="ansible"
     local ssh_dir="/home/$username/.ssh"
@@ -131,43 +131,52 @@ setup_authorized_keys() {
 
     print_status "Setting up authorized_keys for '$username'..."
 
-    if file_exists "$auth_keys"; then
-        # Avoid duplicate entries
-        if grep -qF "$ANSIBLE_PUBLIC_KEY" "$auth_keys" 2>/dev/null; then
-            print_warning "Public key already present in authorized_keys, skipping"
-        else
-            echo "$ANSIBLE_PUBLIC_KEY" >> "$auth_keys"
-            print_success "Public key appended to existing authorized_keys"
-        fi
-    else
-        echo "$ANSIBLE_PUBLIC_KEY" > "$auth_keys"
-        print_success "authorized_keys created with public key"
+    # Validate that the public key variable is not empty or still a placeholder
+    if [[ -z "$CONTROLLER_PUBLIC_KEY" || "$CONTROLLER_PUBLIC_KEY" == *"placeholder"* ]]; then
+        print_error "CONTROLLER_PUBLIC_KEY is not set or still contains the placeholder."
+        print_error "Please edit this script and replace the placeholder with your actual controller public key."
+        exit 1
     fi
 
-    # authorized_keys: owned by ansible, rw------- (600)
+    if file_exists "$auth_keys"; then
+        # Avoid duplicate entries
+        if grep -qF "$CONTROLLER_PUBLIC_KEY" "$auth_keys"; then
+            print_warning "Controller public key already exists in authorized_keys, skipping"
+        else
+            print_status "Appending controller public key to existing authorized_keys..."
+            echo "$CONTROLLER_PUBLIC_KEY" >> "$auth_keys"
+            print_success "Controller public key appended to authorized_keys"
+        fi
+    else
+        print_status "Creating authorized_keys and writing controller public key..."
+        echo "$CONTROLLER_PUBLIC_KEY" > "$auth_keys"
+        print_success "Controller public key written to authorized_keys"
+    fi
+
+    # Set correct ownership and permissions
     chown "$username:$username" "$auth_keys"
     chmod 600 "$auth_keys"
-    print_success "Set ownership and permissions on authorized_keys (600)"
+    print_success "Set permissions 600 on authorized_keys"
 }
 
 # Add ansible user to sudoers
 setup_sudo_access() {
     local username="ansible"
     local sudoers_file="/etc/sudoers.d/$username"
-    
+
     print_status "Setting up sudo access for '$username'..."
-    
+
     if ! directory_exists "/etc/sudoers.d"; then
         mkdir -p /etc/sudoers.d
     fi
-    
+
     if file_exists "$sudoers_file"; then
         print_warning "Sudoers file for '$username' already exists"
     else
         print_status "Adding '$username' to sudoers..."
         echo "$username ALL=(ALL) NOPASSWD:ALL" > "$sudoers_file"
         chmod 660 "$sudoers_file"
-        
+
         if visudo -c -f "$sudoers_file" &>/dev/null; then
             print_success "Added '$username' to sudoers with NOPASSWD"
         else
@@ -176,7 +185,7 @@ setup_sudo_access() {
             exit 1
         fi
     fi
-    
+
     if getent group sudo &>/dev/null; then
         print_status "Adding '$username' to sudo group..."
         usermod -aG sudo "$username"
@@ -191,25 +200,25 @@ setup_sudo_access() {
 # Main execution
 main() {
     print_status "Starting Ansible user setup script..."
-    
+
     check_root
     create_ansible_user
     set_ansible_password
     create_ssh_directory
     setup_authorized_keys
     setup_sudo_access
-    
+
     print_success "Ansible user setup completed successfully!"
     print_status "=== SETUP SUMMARY ==="
-    print_status "Username:          ansible"
-    print_status "Password:          UneeD2024"
-    print_status "Home directory:    /home/ansible"
-    print_status "SSH directory:     /home/ansible/.ssh         (chmod 700)"
-    print_status "authorized_keys:   /home/ansible/.ssh/authorized_keys  (chmod 600)"
-    print_status "Sudo access:       Enabled (NOPASSWD)"
+    print_status "Username: ansible"
+    print_status "Password: UneeD2024"
+    print_status "Home directory: /home/ansible"
+    print_status "SSH directory: /home/ansible/.ssh"
+    print_status "Authorized keys: /home/ansible/.ssh/authorized_keys (permissions: 600)"
+    print_status "Sudo access: Enabled (NOPASSWD)"
     print_status "===================="
     print_status "You can now switch to ansible user with: su - ansible"
-    print_status "Or login via SSH: ssh ansible@<host>"
+    print_status "Or login via SSH: ssh ansible@<slave-ip>"
 }
 
 main "$@"
