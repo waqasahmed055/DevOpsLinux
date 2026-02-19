@@ -4,7 +4,7 @@
 #sudo ./create-user.sh
 # Ansible User Setup Script
 # This script sets up an ansible user with SSH key authentication
-
+#ssh-keygen -t rsa -b 4096 -C "ansible@controller" -f /tmp/dummy_ansible_key -N ""
 set -e  # Exit on any error
 
 # Color codes for output
