@@ -1,0 +1,39 @@
+- name: NinjaOne Status Check and Report
+  hosts: all
+  become: yes
+  gather_facts: no
+
+  tasks:
+    - name: Check NinjaOne package
+      shell: rpm -qa | grep -i ninjaone
+      register: pkg_check
+      changed_when: false
+      failed_when: false
+
+    - name: Check service status
+      shell: systemctl is-active ninjarmm-agent
+      register: svc_check
+      changed_when: false
+      failed_when: false
+
+    - name: Get OS version
+      shell: cat /etc/oracle-release || cat /etc/os-release | grep PRETTY_NAME | cut -d= -f2 | tr -d '"'
+      register: os_ver
+      changed_when: false
+      failed_when: false
+
+    - name: Show broken servers
+      debug:
+        msg:
+          - "======================================"
+          - " ❌ NINJAONE ISSUE: {{ inventory_hostname }}"
+          - " OS      : {{ os_ver.stdout_lines[0] }}"
+          - " Package : {{ pkg_check.stdout if pkg_check.rc == 0 else 'NOT INSTALLED' }}"
+          - " Service : {{ svc_check.stdout | upper }}"
+          - "======================================"
+      when: pkg_check.rc != 0 or svc_check.stdout != "active"
+
+    - name: Show healthy servers
+      debug:
+        msg: "✅ {{ inventory_hostname }} - OK - Service: ACTIVE"
+      when: pkg_check.rc == 0 and svc_check.stdout == "active"
