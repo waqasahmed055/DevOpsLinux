@@ -1,0 +1,25 @@
+- name: Check NinjaOne Agent Status
+  hosts: all
+  become: yes
+  gather_facts: no
+
+  tasks:
+    - name: Check if NinjaOne agent is installed
+      shell: rpm -qa | grep -i ninjaone
+      register: ninja_check
+      changed_when: false
+      failed_when: false
+
+    - name: Check NinjaOne service status
+      shell: systemctl status ninjarmm-agent
+      register: service_check
+      changed_when: false
+      failed_when: false
+
+    - name: Display result
+      debug:
+        msg:
+          - "Host        : {{ inventory_hostname }}"
+          - "Installed   : {{ 'YES' if ninja_check.rc == 0 else 'NO' }}"
+          - "Package     : {{ ninja_check.stdout if ninja_check.rc == 0 else 'N/A' }}"
+          - "Service     : {{ 'RUNNING' if service_check.rc == 0 else 'NOT RUNNING' }}"
