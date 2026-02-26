@@ -1,0 +1,115 @@
+- name: Install NinjaOne Agent on Linux Servers
+  hosts: all                          # Changed from localhost to all target servers
+  become: yes
+  vars:
+    ninja_rpm_src: "/tmp/NinjaOne-Agent-LandingZone-MainOffice-LINUXSERVER-x86-64.rpm"
+    ninja_rpm_dest: "/tmp/NinjaOne-Agent-LandingZone-MainOffice-LINUXSERVER-x86-64.rpm"
+
+  tasks:
+
+    # ── STEP 1: Verify RPM exists on the controller before doing anything ──────
+    - name: Verify RPM file exists on Ansible controller
+      stat:
+        path: "{{ ninja_rpm_src }}"
+      register: rpm_file
+      delegate_to: localhost
+      become: no
+
+    - name: Fail if RPM file not found on controller
+      fail:
+        msg: "RPM file not found on controller at {{ ninja_rpm_src }}"
+      when: not rpm_file.stat.exists
+      delegate_to: localhost
+      become: no
+
+    # ── STEP 2: Check if NinjaOne is already installed on target ───────────────
+    - name: Check if NinjaOne agent is already installed
+      shell: rpm -qa | grep -i ninjaone
+      register: ninja_check
+      changed_when: false
+      failed_when: false
+
+    - name: Display current installation status
+      debug:
+        msg: "NinjaOne agent is {{ 'already installed' if ninja_check.rc == 0 else 'not installed' }} on {{ inventory_hostname }}"
+
+    - name: Skip remaining tasks if already installed
+      meta: end_host
+      when: ninja_check.rc == 0
+
+    # ── STEP 3: Copy RPM from controller to target server ─────────────────────
+    - name: Ensure /tmp has enough space (check available MB)
+      shell: df -m /tmp | awk 'NR==2 {print $4}'
+      register: tmp_space
+      changed_when: false
+
+    - name: Warn if /tmp space is low (less than 200MB)
+      debug:
+        msg: "WARNING: Only {{ tmp_space.stdout }}MB free in /tmp on {{ inventory_hostname }}"
+      when: tmp_space.stdout | int < 200
+
+    - name: Copy NinjaOne RPM to target server
+      copy:
+        src: "{{ ninja_rpm_src }}"
+        dest: "{{ ninja_rpm_dest }}"
+        owner: root
+        group: root
+        mode: '0644'
+      register: copy_result
+
+    - name: Confirm RPM copied successfully
+      debug:
+        msg: "RPM copied to {{ inventory_hostname }}:{{ ninja_rpm_dest }}"
+      when: copy_result.changed
+
+    # ── STEP 4: Ensure dependencies are present (OCI/RHEL requirement) ─────────
+    - name: Ensure required packages are installed (RHEL/OCI)
+      yum:
+        name:
+          - wget
+          - curl
+        state: present
+
+    # ── STEP 5: Install the agent ──────────────────────────────────────────────
+    - name: Install NinjaOne agent RPM
+      yum:
+        name: "{{ ninja_rpm_dest }}"
+        state: present
+        disable_gpg_check: yes
+      register: install_result
+
+    # ── STEP 6: Cleanup copied RPM from target after install ──────────────────
+    - name: Remove RPM file from target after installation
+      file:
+        path: "{{ ninja_rpm_dest }}"
+        state: absent
+
+    # ── STEP 7: Start and enable the service ──────────────────────────────────
+    - name: Start and enable NinjaOne agent service
+      systemd:
+        name: ninjarmm-agent
+        state: started
+        enabled: yes
+
+    - name: Wait for service to stabilize
+      pause:
+        seconds: 5
+
+    - name: Verify NinjaOne agent service status
+      systemd:
+        name: ninjarmm-agent
+      register: service_status
+
+    - name: Display service status
+      debug:
+        msg: "NinjaOne agent service is {{ service_status.status.ActiveState }} on {{ inventory_hostname }}"
+
+    # ── STEP 8: Final verification ─────────────────────────────────────────────
+    - name: Verify installation via RPM db
+      shell: rpm -qa | grep -i ninjaone
+      register: final_check
+      changed_when: false
+
+    - name: Display installation result
+      debug:
+        msg: "Successfully installed on {{ inventory_hostname }}: {{ final_check.stdout }}"
