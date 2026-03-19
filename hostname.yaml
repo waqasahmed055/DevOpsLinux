@@ -9,6 +9,12 @@
       debug:
         msg: "Host: {{ ansible_hostname }} | IP: {{ ansible_default_ipv4.address }} | OS: {{ ansible_distribution }} {{ ansible_distribution_version }}"
 
+    - name: Store facts as custom variables on each host
+      set_fact:
+        my_hostname: "{{ ansible_hostname }}"
+        my_ip: "{{ ansible_default_ipv4.address }}"
+        my_os: "{{ ansible_distribution }} {{ ansible_distribution_version }}"
+
 - name: Write results to CSV on control node
   hosts: localhost
   gather_facts: false
@@ -21,5 +27,5 @@
         content: |
           hostname,ip_address,os_version
           {% for host in groups['all'] %}
-          {{ hostvars[host]['ansible_hostname'] }},{{ hostvars[host]['ansible_default_ipv4']['address'] }},{{ hostvars[host]['ansible_distribution'] }} {{ hostvars[host]['ansible_distribution_version'] }}
+          {{ hostvars[host]['my_hostname'] }},{{ hostvars[host]['my_ip'] }},{{ hostvars[host]['my_os'] }}
           {% endfor %}
