@@ -5,7 +5,7 @@
 
   tasks:
 
-    - name: Print info per host (optional visual check)
+    - name: Print info per host (visual check)
       debug:
         msg: "Host: {{ ansible_hostname }} | IP: {{ ansible_default_ipv4.address }} | OS: {{ ansible_distribution }} {{ ansible_distribution_version }}"
 
@@ -15,14 +15,11 @@
 
   tasks:
 
-    - name: Create CSV file with header
+    - name: Generate CSV file from collected facts
       copy:
-        content: "hostname,ip_address,os_version\n"
-        dest: ./server_inventory_report.csv
-
-    - name: Append each host's data to CSV
-      lineinfile:
-        path: ./server_inventory_report.csv
-        line: "{{ hostvars[item]['ansible_hostname'] }},{{ hostvars[item]['ansible_default_ipv4']['address'] }},{{ hostvars[item]['ansible_distribution'] }} {{ hostvars[item]['ansible_distribution_version'] }}"
-        insertafter: EOF
-      loop: "{{ groups['all'] }}"
+        dest: "{{ playbook_dir }}/server_inventory_report.csv"
+        content: |
+          hostname,ip_address,os_version
+          {% for host in groups['all'] %}
+          {{ hostvars[host]['ansible_hostname'] }},{{ hostvars[host]['ansible_default_ipv4']['address'] }},{{ hostvars[host]['ansible_distribution'] }} {{ hostvars[host]['ansible_distribution_version'] }}
+          {% endfor %}
