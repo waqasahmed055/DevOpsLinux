@@ -1,0 +1,36 @@
+---
+- name: Get hostname and IP for all inventory hosts
+  hosts: all
+  gather_facts: true   # needed to get ansible_default_ipv4
+
+  tasks:
+
+    - name: Run hostname command
+      command: hostname
+      register: hostname_output
+
+    - name: Print hostname and IP address
+      debug:
+        msg: "Host: {{ hostname_output.stdout }} | IP: {{ ansible_default_ipv4.address }}"
+```
+
+---
+
+**How it works:**
+
+- `hosts: all` — targets every host in your inventory.
+- `gather_facts: true` — Ansible's setup module collects system info, including `ansible_default_ipv4.address` (the primary IP).
+- The `command: hostname` task captures the output of the hostname command and stores it in `hostname_output`.
+- The `debug` task prints both values in one clean line per host.
+
+---
+
+**Sample output:**
+```
+TASK [Print hostname and IP address] ***
+ok: [server1] => {
+    "msg": "Host: web-server-01 | IP: 192.168.1.10"
+}
+ok: [server2] => {
+    "msg": "Host: db-server-02 | IP: 192.168.1.20"
+}
