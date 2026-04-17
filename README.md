@@ -85,4 +85,8 @@ find /opt/myapp -type f -exec grep -Ei 'rabbitmq.*(user|username|password)|user(
 sudo -u nagios /usr/lib/nagios/plugins/check_ping -H 8.8.8.8 -w 100.0,20% -c 500.0,60% -p 5
 ```
 
+```
+sudo dnf install php php-cli php-common php-mysqlnd php-gd php-mbstring php-xml php-json php-opcache php-curl php-zip -y
+```
+
 
