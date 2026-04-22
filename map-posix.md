@@ -27,6 +27,36 @@ Use values that match your existing Linux UID/GID plan. The article shows PowerS
 # On the AD domain controller
 Import-Module ActiveDirectory
 
+
+
+## Testing Status & Next Steps
+
+* SSSD tested on OCI servers using **itsdcoci01**
+* Winbind tested by Andrew
+* Two OCI servers built for testing
+
+## Next Step
+
+* Add POSIX attributes:
+
+  * User:
+
+    * `uidNumber`
+    * `gidNumber`
+    * `unixHomeDirectory`
+    * `loginShell`
+
+  * Group:
+
+    * `gidNumber`
+
+* Test ID mapping using:
+
+  * `id ray`
+  * `getent passwd ray`
+  * `getent group ga-sa`
+
+
 # Set POSIX attributes for UserA
 Set-ADUser -Identity "UserA" -Replace @{
     uidNumber = 10001
