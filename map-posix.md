@@ -23,54 +23,6 @@ For the group, the key attribute is:
 
 Use values that match your existing Linux UID/GID plan. The article shows PowerShell examples using `Set-ADUser` and `Set-ADGroup` to populate these fields in AD. ([OneUptime][1])
 
-```powershell
-# On the AD domain controller
-Import-Module ActiveDirectory
-
-
-
-## Testing Status & Next Steps
-
-* SSSD tested on OCI servers using **itsdcoci01**
-* Winbind tested by Andrew
-* Two OCI servers built for testing
-
-## Next Step
-
-* Add POSIX attributes:
-
-  * User:
-
-    * `uidNumber`
-    * `gidNumber`
-    * `unixHomeDirectory`
-    * `loginShell`
-
-  * Group:
-
-    * `gidNumber`
-
-* Test ID mapping using:
-
-  * `id ray`
-  * `getent passwd ray`
-  * `getent group ga-sa`
-
-
-# Set POSIX attributes for UserA
-Set-ADUser -Identity "UserA" -Replace @{
-    uidNumber = 10001
-    gidNumber = 10000
-    unixHomeDirectory = "/home/UserA"
-    loginShell = "/bin/bash"
-}
-
-# Set POSIX attributes for GroupA
-Set-ADGroup -Identity "GroupA" -Replace @{
-    gidNumber = 10000
-}
-```
-
 ## RHEL 8 configuration
 
 After adding the attributes in AD, configure SSSD on RHEL 8 to stop automatic ID mapping so it reads the AD POSIX values instead. The linked guide says to set `ldap_id_mapping = False` in the domain section of `sssd.conf`. ([OneUptime][1])
@@ -110,5 +62,40 @@ Use one method consistently across the environment: either SSSD auto-mapping or 
 If you need, I can turn this into a cleaner internal wiki page with sections like **Purpose**, **Steps**, **Validation**, and **Rollback**.
 
 [1]: https://oneuptime.com/blog/post/2026-03-04-map-ad-users-groups-posix-attributes-rhel/view "
+
+
+
+
+## Testing Status & Next Steps
+
+* SSSD tested on OCI servers using **itsdcoci01**
+* Winbind tested by Andrew
+* Two OCI servers built for testing
+
+## Next Step
+
+* Add user **ray** in AD
+
+* Add group **ga-sa** in AD
+
+* Add POSIX attributes:
+
+  * User:
+
+    * `uidNumber`
+    * `gidNumber`
+    * `unixHomeDirectory`
+    * `loginShell`
+
+  * Group:
+
+    * `gidNumber`
+
+* Test ID mapping using:
+
+  * `id ray`
+  * `getent passwd ray`
+  * `getent group ga-sa`
+
          How to Map Active Directory Users and Groups to RHEL POSIX Attributes
     "
