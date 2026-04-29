@@ -20,8 +20,8 @@ function dbg([string]$msg) {
     }
 }
 
-function Invoke-OCI([string[]]$args) {
-    $fullArgs = $args + @(
+function Invoke-OCI([string[]]$OciArgs) {
+    $fullArgs = $OciArgs + @(
         "--config-file", $OCI_CONFIG_FILE,
         "--profile",     $OCI_PROFILE,
         "--auth",        $OCI_AUTH,
