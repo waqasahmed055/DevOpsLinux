@@ -12,3 +12,41 @@
     - name: Display /boot size
       ansible.builtin.debug:
         msg: "{{ boot_size.stdout_lines }}"
+
+----
+
+---
+- name: Collect /boot partition size and save to Excel-ready CSV
+  hosts: all
+  gather_facts: true
+
+  tasks:
+    - name: Get /boot disk usage via df
+      ansible.builtin.command: df -BM /boot --output=size,used,avail,pcent
+      register: boot_df
+      changed_when: false
+
+    - name: Parse /boot size values
+      ansible.builtin.set_fact:
+        boot_total: "{{ boot_df.stdout_lines[1].split()[0] }}"
+        boot_used:  "{{ boot_df.stdout_lines[1].split()[1] }}"
+        boot_free:  "{{ boot_df.stdout_lines[1].split()[2] }}"
+        boot_used_pct: "{{ boot_df.stdout_lines[1].split()[3] }}"
+
+    - name: Write result to CSV on control node
+      ansible.builtin.lineinfile:
+        path: /tmp/boot_report.csv
+        line: "{{ inventory_hostname }},{{ ansible_host }},{{ boot_total }},{{ boot_used }},{{ boot_free }},{{ boot_used_pct }}"
+        create: true
+      delegate_to: localhost
+
+- name: Add CSV header (runs once at the start via pre_tasks)
+  hosts: localhost
+  gather_facts: false
+
+  pre_tasks:
+    - name: Create CSV with header
+      ansible.builtin.copy:
+        dest: /tmp/boot_report.csv
+        content: "Server Name,IP Address,Total (MB),Used (MB),Free (MB),Used %\n"
+        force: true
