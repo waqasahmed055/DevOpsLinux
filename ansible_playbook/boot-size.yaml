@@ -1,0 +1,14 @@
+---
+- name: Check /boot partition size
+  hosts: all
+  gather_facts: false
+
+  tasks:
+    - name: Run df on /boot
+      ansible.builtin.command: df -h /boot
+      register: boot_size
+      changed_when: false
+
+    - name: Display /boot size
+      ansible.builtin.debug:
+        msg: "{{ boot_size.stdout_lines }}"
