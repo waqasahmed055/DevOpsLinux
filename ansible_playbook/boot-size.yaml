@@ -1,7 +1,3 @@
-server_name,boot_size
-{% for host in groups['all'] | sort -%}
-{{ host }},{{ hostvars[host].boot_size | default('NA') }}
-{% endfor -%}
 ---
 - name: Collect /boot size from all servers
   hosts: all
@@ -9,31 +5,42 @@ server_name,boot_size
   gather_facts: false
 
   tasks:
-    - name: Gather only mount facts
+    - name: Gather mount facts only
       ansible.builtin.setup:
         gather_subset:
           - '!all'
           - '!min'
           - mounts
 
-    - name: Save /boot size as a fact
+    - name: Save /boot size in MB
       ansible.builtin.set_fact:
-        boot_size: >-
+        boot_size_mb: >-
           {{
-            (ansible_facts.mounts
-             | selectattr('mount', 'equalto', '/boot')
-             | map(attribute='size_total')
-             | list
-             | first)
-            | default('NA', true)
+            (
+              (
+                ansible_facts.mounts
+                | selectattr('mount', 'equalto', '/boot')
+                | map(attribute='size_total')
+                | list
+                | first
+                | default(0)
+              ) / 1024 / 1024
+            ) | round(0)
           }}
 
-- name: Create CSV report on controller
+- name: Generate CSV report
   hosts: localhost
   gather_facts: false
 
   tasks:
-    - name: Render CSV file
+    - name: Create CSV spreadsheet report
       ansible.builtin.template:
         src: boot_size_report.csv.j2
         dest: ./boot-size-report.csv
+
+----
+
+server_name,boot_size_mb
+{% for host in groups['all'] -%}
+{{ host }},{{ hostvars[host].boot_size_mb | default('NA') }}
+{% endfor -%}
