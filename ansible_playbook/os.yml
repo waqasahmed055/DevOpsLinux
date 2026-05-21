@@ -2,12 +2,13 @@
 # Playbook : check_os_version.yml
 # Purpose  : Find Oracle Linux 7.x and RHEL 7.x hosts and generate a report
 # Output   : /tmp/ansible_os_report/os_report.txt
-# Usage    :
+#
+# Usage:
 #   ansible-playbook check_os_version.yml -i inventory.ini
 # =============================================================================
 
 # -----------------------------------------------------------------------------
-# PLAY 1 – Gather facts and identify matching hosts
+# PLAY 1 - Gather OS facts from all hosts
 # -----------------------------------------------------------------------------
 - name: Gather OS facts
   hosts: all
@@ -18,7 +19,7 @@
     - name: Build host OS information
       ansible.builtin.set_fact:
         os_info:
-          hostname: "{{ inventory_hostname }}"
+          hostname: "{{ ansible_hostname | default(inventory_hostname) }}"
           ip: "{{ ansible_default_ipv4.address | default(ansible_host | default('N/A')) }}"
           os_label: >-
             {% if ansible_distribution | lower in ['oraclelinux', 'oraclelinuxserver', 'oracleserver'] %}
@@ -46,7 +47,7 @@
           }}
 
 # -----------------------------------------------------------------------------
-# PLAY 2 – Build report on localhost
+# PLAY 2 - Generate report on localhost
 # -----------------------------------------------------------------------------
 - name: Generate OS report
   hosts: localhost
@@ -78,7 +79,7 @@
             | list
           }}
 
-    - name: Create report header
+    - name: Initialize report lines
       ansible.builtin.set_fact:
         report_lines:
           - "=================================================================="
@@ -86,7 +87,7 @@
           - "Generated : {{ lookup('pipe', 'date \"+%Y-%m-%d %H:%M:%S\"') }}"
           - "=================================================================="
 
-    - name: Add empty result message when no hosts match
+    - name: Add message if no hosts matched
       ansible.builtin.set_fact:
         report_lines: "{{ report_lines + ['No matching hosts found.'] }}"
       when: matched_hosts | length == 0
@@ -127,7 +128,6 @@
                 '=================================================================='
               ]
           }}
-      when: matched_hosts | length > 0
 
     - name: Write report to file
       ansible.builtin.copy:
