@@ -87,6 +87,11 @@ sudo -u nagios /usr/lib/nagios/plugins/check_ping -H 8.8.8.8 -w 100.0,20% -c 500
 sudo setfacl -Rm u::rwx,g::rwx,o::-,d:u::rwx,d:g::rwx,d:o::- /degreeworks/dw/admin
 
 ```
+
+```
+sudo dnf install -y oracl-instantclient-release-el8
+sudo dnf install -y oracle-instantclient-basic oracle-instantclient-sqlplus
+```
 sudo dnf install php php-cli php-common php-mysqlnd php-gd php-mbstring php-xml php-json php-opcache php-curl php-zip -y
 ```
 
