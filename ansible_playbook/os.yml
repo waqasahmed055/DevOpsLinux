@@ -1,140 +1,144 @@
----
 # =============================================================================
 # Playbook : check_os_version.yml
-# Purpose  : Find servers running Oracle Linux 7.x (7.0-7.9), Oracle Linux 9,
-#            or RHEL 7.x and write hostname / IP / OS to a plain text report.
-# Output   : /tmp/ansible_os_report/os_report.txt  (control node)
+# Purpose  : Find Oracle Linux 7.x and RHEL 7.x hosts and generate a report
+# Output   : /tmp/ansible_os_report/os_report.txt
 # Usage    :
 #   ansible-playbook check_os_version.yml -i inventory.ini
-#   ansible-playbook check_os_version.yml -i inventory.ini --limit webservers
 # =============================================================================
 
-- name: Collect OS facts from all hosts
+# -----------------------------------------------------------------------------
+# PLAY 1 – Gather facts and identify matching hosts
+# -----------------------------------------------------------------------------
+- name: Gather OS facts
   hosts: all
   gather_facts: true
 
   tasks:
 
-    # -----------------------------------------------------------------------
-    # Build a compact fact dict and decide if this host is a target
-    # Target rules:
-    #   OracleServer  major == 7  (covers 7.0 → 7.9)
-    #   OracleServer  major == 9
-    #   RedHat        major == 7  (covers 7.0 → 7.9)
-    # -----------------------------------------------------------------------
-    - name: Set OS info fact
+    - name: Build host OS information
       ansible.builtin.set_fact:
         os_info:
-          hostname:  "{{ inventory_hostname }}"
-          ip:        "{{ ansible_default_ipv4.address | default(ansible_host | default('N/A')) }}"
+          hostname: "{{ inventory_hostname }}"
+          ip: "{{ ansible_default_ipv4.address | default(ansible_host | default('N/A')) }}"
           os_label: >-
-            {%- if ansible_distribution == 'OracleServer' -%}
+            {% if ansible_distribution | lower in ['oraclelinux', 'oraclelinuxserver', 'oracleserver'] %}
             Oracle Linux {{ ansible_distribution_version }}
-            {%- elif ansible_distribution == 'RedHat' -%}
+            {% elif ansible_distribution | lower in ['redhat', 'red hat enterprise linux'] %}
             RHEL {{ ansible_distribution_version }}
-            {%- else -%}
+            {% else %}
             {{ ansible_distribution }} {{ ansible_distribution_version }}
-            {%- endif -%}
-          distribution: "{{ ansible_distribution }}"
-          major:        "{{ ansible_distribution_major_version }}"
+            {% endif %}
 
-    - name: Flag host as target or not
+    - name: Mark supported 7.x systems
       ansible.builtin.set_fact:
         is_target: >-
           {{
-            (os_info.distribution == 'OracleServer' and os_info.major in ['7','9'])
-            or
-            (os_info.distribution == 'RedHat' and os_info.major == '7')
+            (
+              ansible_distribution | lower
+            ) in [
+              'oraclelinux',
+              'oraclelinuxserver',
+              'oracleserver',
+              'redhat',
+              'red hat enterprise linux'
+            ]
+            and ansible_distribution_major_version == '7'
           }}
 
-# =============================================================================
-# Aggregate on control node → write text report + print table
-# =============================================================================
-- name: Write text report on control node
+# -----------------------------------------------------------------------------
+# PLAY 2 – Build report on localhost
+# -----------------------------------------------------------------------------
+- name: Generate OS report
   hosts: localhost
   connection: local
   gather_facts: false
+
   vars:
-    report_dir:  "/tmp/ansible_os_report"
+    report_dir: "/tmp/ansible_os_report"
     report_file: "{{ report_dir }}/os_report.txt"
 
   tasks:
 
     - name: Create report directory
       ansible.builtin.file:
-        path:  "{{ report_dir }}"
+        path: "{{ report_dir }}"
         state: directory
-        mode:  "0755"
+        mode: "0755"
 
-    # Pull only the matched hosts from hostvars
-    - name: Build matched host list
+    - name: Collect matched hosts
       ansible.builtin.set_fact:
-        matched: >-
+        matched_hosts: >-
           {{
             groups['all']
             | map('extract', hostvars)
-            | selectattr('os_info',  'defined')
-            | selectattr('is_target','defined')
-            | selectattr('is_target')
+            | selectattr('is_target', 'defined')
+            | selectattr('is_target', 'equalto', true)
             | map(attribute='os_info')
+            | sort(attribute='hostname')
             | list
           }}
 
-    # -----------------------------------------------------------------------
-    # Build the text file content
-    # Header + one line per host: Hostname | IP | OS
-    # -----------------------------------------------------------------------
-    - name: Write text report
+    - name: Create report header
+      ansible.builtin.set_fact:
+        report_lines:
+          - "=================================================================="
+          - "OS Inventory Report -- Oracle Linux 7.x / RHEL 7.x"
+          - "Generated : {{ lookup('pipe', 'date \"+%Y-%m-%d %H:%M:%S\"') }}"
+          - "=================================================================="
+
+    - name: Add empty result message when no hosts match
+      ansible.builtin.set_fact:
+        report_lines: "{{ report_lines + ['No matching hosts found.'] }}"
+      when: matched_hosts | length == 0
+
+    - name: Add report table header
+      ansible.builtin.set_fact:
+        report_lines: >-
+          {{
+            report_lines
+            + [
+                '%-32s %-18s %s' | format('Hostname', 'IP Address', 'OS / Version'),
+                '------------------------------------------------------------------'
+              ]
+          }}
+      when: matched_hosts | length > 0
+
+    - name: Add matching hosts to report
+      ansible.builtin.set_fact:
+        report_lines: >-
+          {{
+            report_lines
+            + [
+                '%-32s %-18s %s'
+                | format(item.hostname, item.ip, item.os_label | trim)
+              ]
+          }}
+      loop: "{{ matched_hosts }}"
+      when: matched_hosts | length > 0
+
+    - name: Add report footer
+      ansible.builtin.set_fact:
+        report_lines: >-
+          {{
+            report_lines
+            + [
+                '------------------------------------------------------------------',
+                'Total matched hosts : ' ~ (matched_hosts | length | string),
+                '=================================================================='
+              ]
+          }}
+      when: matched_hosts | length > 0
+
+    - name: Write report to file
       ansible.builtin.copy:
-        dest:    "{{ report_file }}"
-        mode:    "0644"
-        content: |
-          ============================================================
-          OS Inventory Report  —  Oracle Linux 7.x / 9  |  RHEL 7.x
-          Generated : {{ ansible_date_time.iso8601 | default(lookup('pipe','date')) }}
-          ============================================================
-          {% if matched | length == 0 %}
-          No matching hosts found.
-          {% else %}
-          {{ '%-30s' | format('Hostname') }}  {{ '%-18s' | format('IP Address') }}  OS / Version
-          {{ '-' * 70 }}
-          {% for h in matched %}
-          {{ '%-30s' | format(h.hostname) }}  {{ '%-18s' | format(h.ip) }}  {{ h.os_label | trim }}
-          {% endfor %}
-          {{ '-' * 70 }}
-          Total matched hosts : {{ matched | length }}
-          {% endif %}
+        dest: "{{ report_file }}"
+        content: "{{ report_lines | join('\n') }}\n"
+        mode: "0644"
 
-    # -----------------------------------------------------------------------
-    # Print the same table to the Ansible console output
-    # -----------------------------------------------------------------------
-    - name: Print report header
+    - name: Print report to console
       ansible.builtin.debug:
-        msg:
-          - "============================================================"
-          - "  OS Inventory — Oracle Linux 7.x / 9  |  RHEL 7.x"
-          - "============================================================"
-          - "  {{ '%-30s' | format('Hostname') }}  {{ '%-18s' | format('IP Address') }}  OS / Version"
-          - "  {{ '-' * 68 }}"
+        msg: "{{ report_lines }}"
 
-    - name: Print matched host rows
+    - name: Show report location
       ansible.builtin.debug:
-        msg: "  {{ '%-30s' | format(item.hostname) }}  {{ '%-18s' | format(item.ip) }}  {{ item.os_label | trim }}"
-      loop: "{{ matched }}"
-      loop_control:
-        label: "{{ item.hostname }}"
-      when: matched | length > 0
-
-    - name: Print report footer
-      ansible.builtin.debug:
-        msg:
-          - "  {{ '-' * 68 }}"
-          - "  Total matched hosts : {{ matched | length }}"
-          - "  Report saved to     : {{ report_file }}"
-          - "============================================================"
-
-    # Hard stop (set ignore_errors: true if you prefer a warning only)
-    - name: Warn if no hosts matched
-      ansible.builtin.debug:
-        msg: "WARNING: No hosts matched Oracle Linux 7.x/9 or RHEL 7.x — check your inventory."
-      when: matched | length == 0
+        msg: "Report written to: {{ report_file }}"
