@@ -1,0 +1,163 @@
+---
+# =============================================================================
+# Playbook: check_os_version.yml
+# Description: Detects RHEL / Oracle Linux distribution & exact version,
+#              filters for Oracle Linux 7 / Oracle Linux 9 / RHEL 7,
+#              prints a summary table and saves results to JSON for Excel export.
+# Usage:
+#   ansible-playbook check_os_version.yml -i inventory.ini
+#   ansible-playbook check_os_version.yml -i inventory.ini --limit webservers
+# =============================================================================
+
+- name: Gather OS distribution and version facts
+  hosts: all
+  gather_facts: true
+  vars:
+    # Targets: Oracle Linux 7, Oracle Linux 9, RHEL 7
+    target_distros:
+      - { name: "OracleServer", major: "7" }
+      - { name: "OracleServer", major: "9" }
+      - { name: "RedHat",       major: "7" }
+    report_dir: "/tmp/ansible_os_report"
+
+  tasks:
+
+    # -------------------------------------------------------------------------
+    # 1. Collect raw OS facts
+    # -------------------------------------------------------------------------
+    - name: Collect OS information
+      ansible.builtin.set_fact:
+        os_info:
+          hostname:          "{{ inventory_hostname }}"
+          ip_address:        "{{ ansible_default_ipv4.address | default(ansible_host) }}"
+          distribution:      "{{ ansible_distribution }}"
+          major_version:     "{{ ansible_distribution_major_version }}"
+          full_version:      "{{ ansible_distribution_version }}"
+          release_name:      "{{ ansible_distribution_release | default('N/A') }}"
+          kernel:            "{{ ansible_kernel }}"
+          architecture:      "{{ ansible_architecture }}"
+          os_family:         "{{ ansible_os_family }}"
+          # Friendly display name
+          display_name: >-
+            {% if ansible_distribution == 'OracleServer' %}
+            Oracle Linux {{ ansible_distribution_version }}
+            {% elif ansible_distribution == 'RedHat' %}
+            Red Hat Enterprise Linux {{ ansible_distribution_version }}
+            {% else %}
+            {{ ansible_distribution }} {{ ansible_distribution_version }}
+            {% endif %}
+
+    # -------------------------------------------------------------------------
+    # 2. Determine whether this host matches our target list
+    # -------------------------------------------------------------------------
+    - name: Check if host matches target distribution/version
+      ansible.builtin.set_fact:
+        is_target_host: >-
+          {{
+            target_distros
+            | selectattr('name',  'equalto', ansible_distribution)
+            | selectattr('major', 'equalto', ansible_distribution_major_version)
+            | list
+            | length > 0
+          }}
+
+    # -------------------------------------------------------------------------
+    # 3. Print per-host result (all hosts, with a flag for targets)
+    # -------------------------------------------------------------------------
+    - name: Print OS info for every host
+      ansible.builtin.debug:
+        msg: >-
+          [{{ 'TARGET ✔' if is_target_host else 'skipped  ' }}]
+          {{ inventory_hostname }}  |
+          {{ os_info.display_name | trim }}  |
+          Kernel: {{ os_info.kernel }}  |
+          Arch: {{ os_info.architecture }}
+
+    # -------------------------------------------------------------------------
+    # 4. Fail-fast info message for non-target hosts (no actual failure)
+    # -------------------------------------------------------------------------
+    - name: Log non-target hosts
+      ansible.builtin.debug:
+        msg: >-
+          Host {{ inventory_hostname }} runs
+          {{ os_info.display_name | trim }} —
+          NOT in target filter (Oracle 7/9 or RHEL 7). Skipping report entry.
+      when: not is_target_host
+
+# =============================================================================
+# PLAY 2 – Aggregate results on the Ansible control node and save JSON
+# =============================================================================
+- name: Generate JSON report on control node
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    report_dir: "/tmp/ansible_os_report"
+    json_report_path: "{{ report_dir }}/os_report.json"
+    target_distros:
+      - { name: "OracleServer", major: "7" }
+      - { name: "OracleServer", major: "9" }
+      - { name: "RedHat",       major: "7" }
+
+  tasks:
+
+    - name: Ensure report directory exists
+      ansible.builtin.file:
+        path: "{{ report_dir }}"
+        state: directory
+        mode: "0755"
+
+    # Build a list of matching hosts from hostvars
+    - name: Build filtered host report
+      ansible.builtin.set_fact:
+        matched_hosts: >-
+          {{
+            ansible_play_hosts_all
+            | map('extract', hostvars)
+            | selectattr('os_info', 'defined')
+            | selectattr('is_target_host', 'defined')
+            | selectattr('is_target_host')
+            | map(attribute='os_info')
+            | list
+          }}
+      vars:
+        ansible_play_hosts_all: "{{ groups['all'] }}"
+
+    - name: Save JSON report
+      ansible.builtin.copy:
+        content: "{{ matched_hosts | to_nice_json }}"
+        dest: "{{ json_report_path }}"
+        mode: "0644"
+
+    # -------------------------------------------------------------------------
+    # 5. Pretty-print summary table to stdout
+    # -------------------------------------------------------------------------
+    - name: Print summary table header
+      ansible.builtin.debug:
+        msg: |
+          ╔══════════════════════════════════════════════════════════════════════════════════╗
+          ║          FILTERED HOST REPORT  —  Oracle Linux 7/9  |  RHEL 7                  ║
+          ╠══════════════════╦══════════════╦════════════════════════════╦══════════════════╣
+          ║ Hostname         ║ IP Address   ║ OS / Version               ║ Kernel           ║
+          ╠══════════════════╬══════════════╬════════════════════════════╬══════════════════╣
+
+    - name: Print each matched host row
+      ansible.builtin.debug:
+        msg: "  {{ item.hostname | ljust(16) }}  {{ item.ip_address | ljust(15) }}  {{ (item.display_name | trim) | ljust(28) }}  {{ item.kernel }}"
+      loop: "{{ matched_hosts }}"
+      loop_control:
+        label: "{{ item.hostname }}"
+
+    - name: Print summary footer
+      ansible.builtin.debug:
+        msg: |
+          ╚══════════════════════════════════════════════════════════════════════════════════╝
+          Total matched hosts: {{ matched_hosts | length }}
+          JSON report saved to: {{ json_report_path }}
+          Run  generate_excel_report.py  to create the Excel file.
+
+    - name: Fail if no target hosts found
+      ansible.builtin.fail:
+        msg: "No hosts matched Oracle Linux 7/9 or RHEL 7. Check your inventory or OS versions."
+      when: matched_hosts | length == 0
+      ignore_errors: true   # Change to false if you want a hard stop
