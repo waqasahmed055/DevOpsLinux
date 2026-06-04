@@ -1,0 +1,73 @@
+---
+- name: Backup and recreate 10_cohesity.xml firewalld zone file
+  hosts: all
+  become: true
+
+  vars:
+    zone_dir: /etc/firewalld/zones
+    zone_file: 10_cohesity.xml
+    zone_file_path: "{{ zone_dir }}/{{ zone_file }}"
+    backup_path: "{{ zone_dir }}/{{ zone_file }}.bak"
+
+    cohesity_zone_content: |
+      <?xml version="1.0" encoding="utf-8"?>
+      <zone target="ACCEPT">
+        <rule family="ipv4">
+          <icmp-type name="timestamp-request"/>
+          <drop/>
+        </rule>
+        <source address="10.50.52.105"/>
+        <source address="10.50.52.106"/>
+        <source address="10.50.52.107"/>
+        <source address="152.20.52.101"/>
+        <source address="152.20.52.102"/>
+        <source address="152.20.52.103"/>
+        <source address="10.50.52.108"/>
+        <source address="152.20.52.104"/>
+      </zone>
+
+  tasks:
+
+    - name: Ensure firewalld zones directory exists
+      ansible.builtin.file:
+        path: "{{ zone_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0750'
+
+    - name: Check if 10_cohesity.xml exists before backup
+      ansible.builtin.stat:
+        path: "{{ zone_file_path }}"
+      register: zone_file_stat
+
+    - name: Take backup of 10_cohesity.xml (copy to .bak)
+      ansible.builtin.copy:
+        src: "{{ zone_file_path }}"
+        dest: "{{ backup_path }}"
+        remote_src: true
+        owner: root
+        group: root
+        mode: '0640'
+      when: zone_file_stat.stat.exists
+
+    - name: Warn if original file did not exist (no backup taken)
+      ansible.builtin.debug:
+        msg: "WARNING: {{ zone_file_path }} did not exist. No backup was taken."
+      when: not zone_file_stat.stat.exists
+
+    - name: Deploy new 10_cohesity.xml with required content
+      ansible.builtin.copy:
+        content: "{{ cohesity_zone_content }}"
+        dest: "{{ zone_file_path }}"
+        owner: root
+        group: root
+        mode: '0640'
+      notify: Reload firewalld
+
+  handlers:
+
+    - name: Reload firewalld
+      ansible.builtin.systemd:
+        name: firewalld
+        state: reloaded
