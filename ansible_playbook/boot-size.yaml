@@ -27,37 +27,25 @@
             ) | round(0)
           }}
 
-    - name: Get partition usage
+    - name: Print disk report directly on each host
       ansible.builtin.shell: |
-        df -Ph | tail -n +2
-      register: df_output
-      changed_when: false
-
-    - name: Get physical disks
-      ansible.builtin.shell: |
+        echo ""
+        echo "============================================================"
+        echo "HOST: $(hostname)"
+        echo "============================================================"
+        echo ""
+        echo "/boot size: {{ boot_size_mb }} MB"
+        echo ""
+        echo "--- Partition Usage (df) ---"
+        df -Ph
+        echo ""
+        echo "--- Block Devices (lsblk) ---"
         lsblk -o NAME,TYPE,SIZE,FSTYPE,MOUNTPOINT | grep -v loop
-      register: lsblk_output
+        echo ""
+        echo "============================================================"
+      register: report_output
       changed_when: false
 
-- name: Print disk report to screen
-  hosts: localhost
-  gather_facts: false
-  tasks:
-
-    - name: Display report for each host
+    - name: Show report output
       ansible.builtin.debug:
-        msg: |
-          ============================================================
-          HOST: {{ item }}
-          ============================================================
-
-          /boot size: {{ hostvars[item].boot_size_mb | default('NA') }} MB
-
-          --- Partition Usage (df) ---
-          {{ hostvars[item].df_output.stdout }}
-
-          --- Block Devices (lsblk) ---
-          {{ hostvars[item].lsblk_output.stdout }}
-
-          ============================================================
-      loop: "{{ groups['all'] }}"
+        msg: "{{ report_output.stdout_lines }}"
