@@ -1,10 +1,9 @@
----
-- name: Collect /boot size from all servers
+- name: Collect /boot and disk info from all servers
   hosts: all
   become: true
   gather_facts: false
-
   tasks:
+
     - name: Gather mount facts only
       ansible.builtin.setup:
         gather_subset:
@@ -28,19 +27,45 @@
             ) | round(0)
           }}
 
+    - name: Get partition usage via df (human-readable, POSIX)
+      ansible.builtin.command:
+        cmd: df -P --block-size=1M
+      register: df_output
+      changed_when: false
+
+    - name: Get block device list via lsblk
+      ansible.builtin.command:
+        cmd: lsblk -bno NAME,TYPE,SIZE,MOUNTPOINT
+      register: lsblk_output
+      changed_when: false
+
+    - name: Parse df output into structured list
+      ansible.builtin.set_fact:
+        df_parsed: >-
+          {{
+            df_output.stdout_lines[1:]
+            | map('split')
+            | map('list')
+            | selectattr(4, 'defined')
+            | list
+          }}
+
+    - name: Parse lsblk output into structured list
+      ansible.builtin.set_fact:
+        lsblk_parsed: >-
+          {{
+            lsblk_output.stdout_lines
+            | map('split')
+            | selectattr(1, 'equalto', 'disk')
+            | list
+          }}
+
 - name: Generate CSV report
   hosts: localhost
   gather_facts: false
-
   tasks:
+
     - name: Create CSV spreadsheet report
       ansible.builtin.template:
         src: boot_size_report.csv.j2
         dest: ./boot-size-report.csv
-
-----
-
-server_name,boot_size_mb
-{% for host in groups['all'] -%}
-{{ host }},{{ hostvars[host].boot_size_mb | default('NA') }}
-{% endfor -%}
