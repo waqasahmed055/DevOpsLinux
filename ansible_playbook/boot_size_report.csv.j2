@@ -1,0 +1,32 @@
+##############################################
+# SECTION 1: /boot partition size per server
+##############################################
+server_name,boot_size_mb
+{% for host in groups['all'] -%}
+{{ host }},{{ hostvars[host].boot_size_mb | default('NA') }}
+{% endfor %}
+
+##############################################
+# SECTION 2: Partition usage (df -P output)
+# Filesystem,Size_MB,Used_MB,Avail_MB,Use%,MountPoint
+##############################################
+server_name,filesystem,size_mb,used_mb,avail_mb,use_pct,mountpoint
+{% for host in groups['all'] -%}
+{% set df_data = hostvars[host].df_parsed | default([]) -%}
+{% for row in df_data -%}
+{{ host }},{{ row[0] }},{{ row[1] }},{{ row[2] }},{{ row[3] }},{{ row[4] }},{{ row[5] | default('') }}
+{% endfor -%}
+{% endfor %}
+
+##############################################
+# SECTION 3: Physical disk summary (lsblk)
+# Shows total disk size — compare with df
+# to estimate unpartitioned/unallocated space
+##############################################
+server_name,disk_name,total_disk_size_mb
+{% for host in groups['all'] -%}
+{% set lsblk_data = hostvars[host].lsblk_parsed | default([]) -%}
+{% for row in lsblk_data -%}
+{{ host }},{{ row[0] }},{{ ((row[2] | int) / 1024 / 1024) | round(0) | int }}
+{% endfor -%}
+{% endfor %}
