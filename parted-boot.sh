@@ -3,7 +3,8 @@
 # create_newboot_partition.sh
 #
 # Creates a new 3 GiB XFS partition on /dev/sda (next available slot),
-# formats it as XFS, mounts it at /newboot, and adds it to /etc/fstab.
+# formats it as XFS, mounts it at /newboot, copies /boot contents into it,
+# and adds it to /etc/fstab.
 #
 # Designed for RHEL 8 / RHEL 9 systems.
 #
@@ -229,7 +230,7 @@ else
 fi
 
 # =============================================================================
-# 7. Mount and add to fstab
+# 7. Mount and copy /boot contents
 # =============================================================================
 step "Mounting $NEW_PART at $MOUNT_POINT"
 
@@ -242,7 +243,23 @@ if ! $DRY_RUN; then
         || die "Mount failed for $NEW_PART at $MOUNT_POINT."
 fi
 
-step "Adding entry to /etc/fstab"
+# ── Copy /boot contents into the new partition ──────────────────────────────
+step "Copying /boot contents to $MOUNT_POINT"
+run "cp -arv /boot/. \"$MOUNT_POINT/\""
+
+if ! $DRY_RUN; then
+    # Quick check: list some files to confirm
+    info "Contents of $MOUNT_POINT:"
+    ls -la "$MOUNT_POINT" | head -10
+    ok "Copy completed. All /boot files are now on the new partition."
+else
+    info "[DRY-RUN] Would copy /boot/. to $MOUNT_POINT/"
+fi
+
+# =============================================================================
+# 8. Add to /etc/fstab (for /newboot) – optional, you can comment out
+# =============================================================================
+step "Adding entry to /etc/fstab for $MOUNT_POINT"
 FSTAB_COMMENT="# /newboot — added by create_newboot_partition.sh"
 FSTAB_ENTRY="UUID=${PART_UUID}  ${MOUNT_POINT}  ${FS_TYPE}  defaults  0  0"
 
@@ -253,7 +270,7 @@ if ! $DRY_RUN; then
         echo "$FSTAB_COMMENT"
         echo "$FSTAB_ENTRY"
     } >> /etc/fstab
-    ok "/etc/fstab updated."
+    ok "/etc/fstab updated with /newboot entry."
     info "fstab line: $FSTAB_ENTRY"
 else
     echo -e "${YLW}[DRY-RUN]${NC} Would append to /etc/fstab:"
@@ -267,7 +284,7 @@ if ! $DRY_RUN && command -v findmnt &>/dev/null; then
 fi
 
 # =============================================================================
-# 8. Summary
+# 9. Summary
 # =============================================================================
 step "Summary"
 
@@ -281,11 +298,17 @@ if ! $DRY_RUN; then
     info "Partition : $NEW_PART"
     info "UUID      : $PART_UUID"
     info "Mount     : $MOUNT_POINT"
-    info "fstab     : backed up and updated"
+    info "fstab     : backed up and updated with $MOUNT_POINT entry."
+    echo
+    info "Next steps (manual):"
+    info "  1. Update /etc/fstab to change /boot mount to UUID=$PART_UUID"
+    info "  2. Reboot and verify that /boot uses the new larger partition"
+    info "  3. After reboot, you can remove the old /boot partition if no longer needed"
 else
     echo
     ok "[DRY-RUN] No changes were made."
     info "Would have created : $NEW_PART"
     info "Would have mounted : $MOUNT_POINT"
+    info "Would have copied  : /boot to $MOUNT_POINT"
     info "Partition size     : ${PART_SIZE_MB} MiB"
 fi
