@@ -1,0 +1,220 @@
+---
+- name: Create a new /boot partition (3 GiB XFS) and copy /boot contents
+  hosts: all
+  become: true
+  vars:
+    disk: /dev/sda
+    mount_point: /newboot
+    fs_type: xfs
+    part_size_mb: 3000
+    part_label: newboot
+
+  tasks:
+    # ------------------------------------------------------------------------
+    # 1. Install required packages
+    # ------------------------------------------------------------------------
+    - name: Install parted and xfsprogs
+      ansible.builtin.package:
+        name:
+          - parted
+          - xfsprogs
+        state: present
+
+    # ------------------------------------------------------------------------
+    # 2. Gather disk information using parted (machine‑readable output)
+    # ------------------------------------------------------------------------
+    - name: Get partition table info from {{ disk }}
+      ansible.builtin.command:
+        cmd: parted -m -s {{ disk }} unit MiB print
+      register: parted_output
+      changed_when: false
+
+    - name: Parse parted output
+      ansible.builtin.set_fact:
+        disk_info: "{{ parted_output.stdout_lines | select('match', '^' + disk + ':') | first }}"
+        partition_lines: "{{ parted_output.stdout_lines | select('match', '^[0-9]+:') | list }}"
+
+    - name: Extract disk total size and partition table type
+      ansible.builtin.set_fact:
+        disk_size_mb: "{{ disk_info.split(':')[1] | regex_replace('[^0-9]', '') | int }}"
+        ptable_type: "{{ disk_info.split(':')[5] }}"
+
+    - name: Find last partition number and end sector
+      ansible.builtin.set_fact:
+        last_part_line: "{{ partition_lines | last }}"
+      when: partition_lines | length > 0
+
+    - name: Set last partition info
+      ansible.builtin.set_fact:
+        last_part_num: "{{ last_part_line.split(':')[0] | int }}"
+        last_part_end: "{{ last_part_line.split(':')[2] | regex_replace('[^0-9]', '') | int }}"
+      when: partition_lines | length > 0
+
+    - name: Calculate free space and new partition boundaries
+      ansible.builtin.set_fact:
+        free_mb: "{{ disk_size_mb - last_part_end }}"
+        next_part_num: "{{ last_part_num + 1 }}"
+        new_start_mb: "{{ last_part_end + 1 }}"
+        new_end_mb: "{{ last_part_end + part_size_mb }}"
+      when: partition_lines | length > 0
+
+    # ------------------------------------------------------------------------
+    # 3. Validate free space and abort if insufficient
+    # ------------------------------------------------------------------------
+    - name: Fail if not enough free space
+      ansible.builtin.fail:
+        msg: "Not enough free space. Need {{ part_size_mb }} MiB, have {{ free_mb }} MiB."
+      when: free_mb < part_size_mb
+
+    - name: Determine new partition device name
+      ansible.builtin.set_fact:
+        new_part: "{{ disk if disk is not search('nvme') else disk + 'p' }}{{ next_part_num }}"
+
+    # ------------------------------------------------------------------------
+    # 4. Pre‑flight checks (idempotency)
+    # ------------------------------------------------------------------------
+    - name: Check if {{ new_part }} already exists
+      ansible.builtin.stat:
+        path: "{{ new_part }}"
+      register: new_part_stat
+
+    - name: Fail if {{ new_part }} already exists
+      ansible.builtin.fail:
+        msg: "Device {{ new_part }} already exists. Aborting to avoid overwriting."
+      when: new_part_stat.stat.exists
+
+    - name: Check if {{ mount_point }} is already mounted
+      ansible.builtin.mount:
+        path: "{{ mount_point }}"
+        state: absent
+      check_mode: true
+      register: mount_check
+      ignore_errors: true
+
+    - name: Fail if {{ mount_point }} is mounted
+      ansible.builtin.fail:
+        msg: "{{ mount_point }} is already mounted. Aborting."
+      when: mount_check is failed
+
+    # ------------------------------------------------------------------------
+    # 5. Create the partition (only if not exists)
+    # ------------------------------------------------------------------------
+    - name: Create new partition on {{ disk }}
+      ansible.builtin.command:
+        cmd: parted -s {{ disk }} mkpart primary {{ fs_type }} {{ new_start_mb }}MiB {{ new_end_mb }}MiB
+      args:
+        creates: "{{ new_part }}"   # idempotent: skip if device exists
+      register: part_create
+
+    - name: Notify kernel and wait for device to appear
+      ansible.builtin.command:
+        cmd: partprobe {{ disk }}
+      when: part_create is changed
+      changed_when: false
+
+    - name: Wait for {{ new_part }} to appear
+      ansible.builtin.wait_for:
+        path: "{{ new_part }}"
+        state: present
+        timeout: 30
+      when: part_create is changed
+
+    # ------------------------------------------------------------------------
+    # 6. Format as XFS
+    # ------------------------------------------------------------------------
+    - name: Format {{ new_part }} as XFS with label {{ part_label }}
+      ansible.builtin.filesystem:
+        dev: "{{ new_part }}"
+        fstype: "{{ fs_type }}"
+        label: "{{ part_label }}"
+        force: true
+
+    - name: Get UUID of new partition
+      ansible.builtin.command:
+        cmd: blkid -s UUID -o value {{ new_part }}
+      register: blkid_output
+      changed_when: false
+
+    - name: Set UUID fact
+      ansible.builtin.set_fact:
+        new_uuid: "{{ blkid_output.stdout }}"
+
+    # ------------------------------------------------------------------------
+    # 7. Mount new partition and copy /boot contents
+    # ------------------------------------------------------------------------
+    - name: Create mount point directory
+      ansible.builtin.file:
+        path: "{{ mount_point }}"
+        state: directory
+        mode: '0755'
+
+    - name: Mount {{ new_part }} at {{ mount_point }}
+      ansible.builtin.mount:
+        path: "{{ mount_point }}"
+        src: "{{ new_part }}"
+        fstype: "{{ fs_type }}"
+        state: mounted
+        opts: defaults
+
+    - name: Copy /boot contents to {{ mount_point }}
+      ansible.builtin.copy:
+        src: /boot/
+        dest: "{{ mount_point }}/"
+        remote_src: true
+        owner: root
+        group: root
+        mode: preserve
+        directory_mode: true
+      register: copy_result
+
+    - name: Show sample listing of copied files (for verification)
+      ansible.builtin.shell:
+        cmd: ls -la {{ mount_point }} | head -10
+      register: listing
+      changed_when: false
+
+    - name: Display copied files
+      ansible.builtin.debug:
+        var: listing.stdout_lines
+
+    # ------------------------------------------------------------------------
+    # 8. Add entry to /etc/fstab for the new mount point (optional)
+    # ------------------------------------------------------------------------
+    - name: Backup fstab
+      ansible.builtin.copy:
+        src: /etc/fstab
+        dest: "/etc/fstab.bak.{{ ansible_date_time.epoch }}"
+        remote_src: true
+      when: not ansible_check_mode
+
+    - name: Add mount entry for {{ mount_point }} to /etc/fstab
+      ansible.builtin.mount:
+        path: "{{ mount_point }}"
+        src: "UUID={{ new_uuid }}"
+        fstype: "{{ fs_type }}"
+        opts: defaults
+        dump: 0
+        passno: 0
+        state: present
+
+    - name: Verify fstab syntax
+      ansible.builtin.command:
+        cmd: findmnt --verify --verbose
+      register: findmnt_verify
+      changed_when: false
+      failed_when: findmnt_verify.rc != 0
+      ignore_errors: true
+
+    # ------------------------------------------------------------------------
+    # 9. Summary
+    # ------------------------------------------------------------------------
+    - name: Display final summary
+      ansible.builtin.debug:
+        msg:
+          - "Partition created: {{ new_part }}"
+          - "UUID: {{ new_uuid }}"
+          - "Mounted at: {{ mount_point }}"
+          - "Next steps: update /etc/fstab to change /boot to the new UUID, then reboot."
+          - "After reboot, you can remove old /boot partition if desired."
+
+    # Optional: unmount /newboot? We leave it mounted so user can inspect.
