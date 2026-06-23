@@ -1,0 +1,136 @@
+---
+- name: Limit kernel retention to 3 and refresh package cache
+  hosts: all
+  become: true
+  gather_facts: true
+
+  vars:
+    kernel_limit: 3
+
+  tasks:
+
+    - name: Assert supported RHEL major version
+      assert:
+        that:
+          - ansible_distribution in ["RedHat", "OracleLinux", "CentOS"]
+          - ansible_distribution_major_version in ["7", "8", "9"]
+        fail_msg: "Unsupported OS: {{ ansible_distribution }} {{ ansible_distribution_major_version }}"
+        success_msg: "Supported OS detected: {{ ansible_distribution }} {{ ansible_distribution_major_version }}"
+
+    # -------------------------------------------------------------------------
+    # Set config file path based on RHEL version
+    # -------------------------------------------------------------------------
+    - name: Set package manager config path (RHEL 7 → yum.conf)
+      set_fact:
+        pkg_conf_path: /etc/yum/yum.conf
+      when: ansible_distribution_major_version == "7"
+
+    - name: Set package manager config path (RHEL 8/9 → dnf.conf)
+      set_fact:
+        pkg_conf_path: /etc/dnf/dnf.conf
+      when: ansible_distribution_major_version in ["8", "9"]
+
+    - name: Show resolved config path
+      debug:
+        msg: "Using config file: {{ pkg_conf_path }} on {{ inventory_hostname }}"
+
+    # -------------------------------------------------------------------------
+    # Ensure installonly_limit is set correctly
+    # -------------------------------------------------------------------------
+    - name: Check if installonly_limit already exists in config
+      command: grep -E '^\s*installonly_limit\s*=' {{ pkg_conf_path }}
+      register: installonly_check
+      changed_when: false
+      failed_when: false
+
+    - name: Update existing installonly_limit value
+      lineinfile:
+        path: "{{ pkg_conf_path }}"
+        regexp: '^\s*installonly_limit\s*='
+        line: "installonly_limit={{ kernel_limit }}"
+        backrefs: yes
+      when: installonly_check.rc == 0
+
+    - name: Add installonly_limit under [main] section if missing
+      lineinfile:
+        path: "{{ pkg_conf_path }}"
+        insertafter: '^\[main\]'
+        line: "installonly_limit={{ kernel_limit }}"
+      when: installonly_check.rc != 0
+
+    - name: Verify installonly_limit in config
+      command: grep 'installonly_limit' {{ pkg_conf_path }}
+      register: verify_limit
+      changed_when: false
+
+    - name: Show installonly_limit value
+      debug:
+        msg: "{{ verify_limit.stdout }}"
+
+    # -------------------------------------------------------------------------
+    # Show current kernel count before cleanup
+    # -------------------------------------------------------------------------
+    - name: List installed kernels before cleanup
+      shell: rpm -q kernel --qf "%{NAME}-%{VERSION}-%{RELEASE}.%{ARCH}\n" | sort
+      register: kernels_before
+      changed_when: false
+
+    - name: Show kernels before cleanup
+      debug:
+        msg: "{{ kernels_before.stdout_lines }}"
+
+    # -------------------------------------------------------------------------
+    # Remove old kernels (package-cleanup for RHEL7, dnf for RHEL8+)
+    # -------------------------------------------------------------------------
+    - name: Remove old kernels keeping {{ kernel_limit }} (RHEL 7 — package-cleanup)
+      command: package-cleanup --oldkernels --count={{ kernel_limit }} -y
+      when: ansible_distribution_major_version == "7"
+      register: cleanup_rhel7
+
+    - name: Remove old kernels keeping {{ kernel_limit }} (RHEL 8/9 — dnf)
+      command: dnf remove --oldinstallonly --setopt installonly_limit={{ kernel_limit }} -y
+      when: ansible_distribution_major_version in ["8", "9"]
+      register: cleanup_rhel8
+
+    # -------------------------------------------------------------------------
+    # Clean package cache
+    # -------------------------------------------------------------------------
+    - name: Clean all package cache (RHEL 7 — yum)
+      command: yum clean all
+      when: ansible_distribution_major_version == "7"
+
+    - name: Clean all package cache (RHEL 8/9 — dnf)
+      command: dnf clean all
+      when: ansible_distribution_major_version in ["8", "9"]
+
+    # -------------------------------------------------------------------------
+    # Rebuild package cache
+    # -------------------------------------------------------------------------
+    - name: Rebuild package metadata cache (RHEL 7 — yum)
+      command: yum makecache
+      when: ansible_distribution_major_version == "7"
+
+    - name: Rebuild package metadata cache (RHEL 8/9 — dnf)
+      command: dnf makecache
+      when: ansible_distribution_major_version in ["8", "9"]
+
+    # -------------------------------------------------------------------------
+    # Confirm kernel count after cleanup
+    # -------------------------------------------------------------------------
+    - name: List installed kernels after cleanup
+      shell: rpm -q kernel --qf "%{NAME}-%{VERSION}-%{RELEASE}.%{ARCH}\n" | sort
+      register: kernels_after
+      changed_when: false
+
+    - name: Show kernels after cleanup
+      debug:
+        msg: "{{ kernels_after.stdout_lines }}"
+
+    - name: Summary
+      debug:
+        msg:
+          - "Host         : {{ inventory_hostname }}"
+          - "Config file  : {{ pkg_conf_path }}"
+          - "Kernel limit : {{ kernel_limit }}"
+          - "Before count : {{ kernels_before.stdout_lines | length }}"
+          - "After count  : {{ kernels_after.stdout_lines | length }}"
