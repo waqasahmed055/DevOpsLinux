@@ -1,0 +1,166 @@
+---
+- name: Inventory Docker and Podman across all servers
+  hosts: all
+  become: true
+  gather_facts: false
+
+  tasks:
+
+    # ------------------------------------------------------------------
+    # 1. Query installed packages (single rpm call, fast)
+    # ------------------------------------------------------------------
+    - name: Query Docker and Podman RPM packages
+      ansible.builtin.shell: >
+        rpm -qa --qf '%{NAME}|%{VERSION}|%{RELEASE}\n'
+        | grep -iE '^(docker|podman|moby-engine|containerd)'
+        || true
+      register: pkg_query
+      changed_when: false
+      failed_when: false
+
+    # ------------------------------------------------------------------
+    # 2. Derive booleans from the query output
+    # ------------------------------------------------------------------
+    - name: Set Docker detected flag
+      ansible.builtin.set_fact:
+        has_docker: >-
+          {{ pkg_query.stdout_lines
+             | select('match', '(?i)^(docker|moby-engine|containerd)')
+             | list | length > 0 }}
+
+    - name: Set Podman detected flag
+      ansible.builtin.set_fact:
+        has_podman: >-
+          {{ pkg_query.stdout_lines
+             | select('match', '(?i)^podman')
+             | list | length > 0 }}
+
+    # ------------------------------------------------------------------
+    # 3. Collect exact package names + versions for the summary
+    # ------------------------------------------------------------------
+    - name: Collect Docker package details
+      ansible.builtin.set_fact:
+        docker_pkgs: >-
+          {{ pkg_query.stdout_lines
+             | select('match', '(?i)^(docker|moby-engine|containerd)')
+             | list }}
+
+    - name: Collect Podman package details
+      ansible.builtin.set_fact:
+        podman_pkgs: >-
+          {{ pkg_query.stdout_lines
+             | select('match', '(?i)^podman')
+             | list }}
+
+  # ---------------------------------------------------------------------------
+  # Post-play: single run on localhost to print the consolidated table
+  # ---------------------------------------------------------------------------
+  post_tasks:
+
+    - name: Print per-host result
+      ansible.builtin.debug:
+        msg: >-
+          {% if has_docker | bool and has_podman | bool %}
+          [BOTH]   {{ inventory_hostname }} → Docker AND Podman installed (CONFLICT)
+          {% elif has_docker | bool %}
+          [DOCKER] {{ inventory_hostname }} → Docker
+          {% elif has_podman | bool %}
+          [PODMAN] {{ inventory_hostname }} → Podman
+          {% else %}
+          [NONE]   {{ inventory_hostname }} → Neither Docker nor Podman found
+          {% endif %}
+
+
+# ---------------------------------------------------------------------------
+# Second play – runs only on controller, prints the final grouped summary
+# ---------------------------------------------------------------------------
+- name: Print consolidated summary
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  tasks:
+
+    - name: "=== DOCKER / PODMAN INVENTORY SUMMARY ==="
+      ansible.builtin.debug:
+        msg: |
+
+          ╔══════════════════════════════════════════════════════╗
+          ║       DOCKER / PODMAN INVENTORY SUMMARY              ║
+          ╚══════════════════════════════════════════════════════╝
+
+          ── DOCKER only ──────────────────────────────────────────
+          {% set docker_hosts = [] %}
+          {% for h in groups['all'] %}
+          {%   if hostvars[h].has_docker | default(false) | bool
+                and not hostvars[h].has_podman | default(false) | bool %}
+          {%     set _ = docker_hosts.append(h) %}
+          {%   endif %}
+          {% endfor %}
+          {% if docker_hosts %}
+          {% for h in docker_hosts %}
+            • {{ h }}
+                 packages: {{ hostvars[h].docker_pkgs | join(', ') }}
+          {% endfor %}
+          {% else %}
+            (none)
+          {% endif %}
+
+          ── PODMAN only ──────────────────────────────────────────
+          {% set podman_hosts = [] %}
+          {% for h in groups['all'] %}
+          {%   if hostvars[h].has_podman | default(false) | bool
+                and not hostvars[h].has_docker | default(false) | bool %}
+          {%     set _ = podman_hosts.append(h) %}
+          {%   endif %}
+          {% endfor %}
+          {% if podman_hosts %}
+          {% for h in podman_hosts %}
+            • {{ h }}
+                 packages: {{ hostvars[h].podman_pkgs | join(', ') }}
+          {% endfor %}
+          {% else %}
+            (none)
+          {% endif %}
+
+          ── BOTH (conflict!) ─────────────────────────────────────
+          {% set both_hosts = [] %}
+          {% for h in groups['all'] %}
+          {%   if hostvars[h].has_docker | default(false) | bool
+                and hostvars[h].has_podman | default(false) | bool %}
+          {%     set _ = both_hosts.append(h) %}
+          {%   endif %}
+          {% endfor %}
+          {% if both_hosts %}
+          {% for h in both_hosts %}
+            ⚠ {{ h }}
+                 docker : {{ hostvars[h].docker_pkgs | join(', ') }}
+                 podman : {{ hostvars[h].podman_pkgs | join(', ') }}
+          {% endfor %}
+          {% else %}
+            (none)
+          {% endif %}
+
+          ── NEITHER ──────────────────────────────────────────────
+          {% set none_hosts = [] %}
+          {% for h in groups['all'] %}
+          {%   if not hostvars[h].has_docker | default(false) | bool
+                and not hostvars[h].has_podman | default(false) | bool %}
+          {%     set _ = none_hosts.append(h) %}
+          {%   endif %}
+          {% endfor %}
+          {% if none_hosts %}
+          {% for h in none_hosts %}
+            • {{ h }}
+          {% endfor %}
+          {% else %}
+            (none)
+          {% endif %}
+
+          ── COUNTS ───────────────────────────────────────────────
+            Total hosts : {{ groups['all'] | length }}
+            Docker only : {{ docker_hosts | length }}
+            Podman only : {{ podman_hosts | length }}
+            Both (⚠)   : {{ both_hosts | length }}
+            Neither     : {{ none_hosts | length }}
+          ══════════════════════════════════════════════════════════
