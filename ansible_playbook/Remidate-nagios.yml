@@ -1,0 +1,95 @@
+---
+# =============================================================================
+# Playbook : remediate_nagios_suid.yml
+# Purpose  : Remove SUID/SGID and execution permissions from the Nagios
+#            check_init_service script flagged by Nexpose as
+#            "SUID or SGID Bit Set Upon Script File" vulnerability.
+# Ticket   : OCI environment – multiple Linux servers
+# Fix      : chmod -xs /usr/local/nagios/libexec/check_init_service
+# Author   : Waqas
+# =============================================================================
+
+- name: Remediate Nexpose finding - Remove SUID/SGID/Execute from check_init_service
+  hosts: all                    # Replace with your target host group (e.g., oci_linux)
+  become: true
+  gather_facts: false
+
+  vars:
+    target_file: /usr/local/nagios/libexec/check_init_service
+    # Hardened mode: 0644 removes SUID, SGID, and all execute bits.
+    # If the file must remain non-executable to all, 0644 is correct.
+    # If it was rwxr-xr-x without SUID you can use 0755 here instead.
+    target_mode: '0644'
+
+  tasks:
+
+    # ------------------------------------------------------------------
+    # 1. PRE-CHECK – gather current stat so we can log before/after
+    # ------------------------------------------------------------------
+    - name: Stat the target file (pre-remediation)
+      ansible.builtin.stat:
+        path: "{{ target_file }}"
+      register: file_stat_before
+
+    - name: Print pre-remediation permissions
+      ansible.builtin.debug:
+        msg: >
+          [PRE]  {{ inventory_hostname }} |
+          exists={{ file_stat_before.stat.exists }} |
+          mode={{ file_stat_before.stat.mode | default('N/A') }} |
+          suid={{ file_stat_before.stat.issuid | default(false) }} |
+          sgid={{ file_stat_before.stat.isgid  | default(false) }}
+      when: file_stat_before.stat.exists
+
+    - name: Warn if file does not exist – skipping host
+      ansible.builtin.debug:
+        msg: "SKIP: {{ target_file }} not found on {{ inventory_hostname }}"
+      when: not file_stat_before.stat.exists
+
+    # ------------------------------------------------------------------
+    # 2. REMEDIATE – strip SUID, SGID, and execute bits
+    #    Only runs when the file actually exists on the host.
+    # ------------------------------------------------------------------
+    - name: Remove SUID, SGID, and execute bits from check_init_service
+      ansible.builtin.file:
+        path: "{{ target_file }}"
+        mode: "{{ target_mode }}"
+        # Keep owner/group untouched – do NOT set owner/group here
+        # unless you explicitly want to change them.
+      when: file_stat_before.stat.exists
+      register: chmod_result
+
+    # ------------------------------------------------------------------
+    # 3. POST-CHECK – verify the change was applied correctly
+    # ------------------------------------------------------------------
+    - name: Stat the target file (post-remediation)
+      ansible.builtin.stat:
+        path: "{{ target_file }}"
+      register: file_stat_after
+      when: file_stat_before.stat.exists
+
+    - name: Print post-remediation permissions
+      ansible.builtin.debug:
+        msg: >
+          [POST] {{ inventory_hostname }} |
+          mode={{ file_stat_after.stat.mode }} |
+          suid={{ file_stat_after.stat.issuid | default(false) }} |
+          sgid={{ file_stat_after.stat.isgid  | default(false) }} |
+          changed={{ chmod_result.changed }}
+      when: file_stat_before.stat.exists
+
+    # ------------------------------------------------------------------
+    # 4. ASSERT – fail the play if SUID/SGID bits are still present
+    # ------------------------------------------------------------------
+    - name: Assert SUID and SGID bits are no longer set
+      ansible.builtin.assert:
+        that:
+          - not (file_stat_after.stat.issuid | default(false))
+          - not (file_stat_after.stat.isgid  | default(false))
+        fail_msg: >
+          FAILED: SUID or SGID still present on {{ target_file }}
+          on host {{ inventory_hostname }} (mode={{ file_stat_after.stat.mode }}).
+        success_msg: >
+          OK: SUID/SGID successfully removed from {{ target_file }}
+          on {{ inventory_hostname }} (mode={{ file_stat_after.stat.mode }}).
+      when: file_stat_before.stat.exists
