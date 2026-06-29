@@ -8,68 +8,85 @@
     # Path where the NGT installer is already staged on the remote host
     ngt_src_path: /tmp/ngt_installer
 
-    # Install NGT Self-Service Restore (SSR / File Level Restore) - true/false
-    ngt_enable_ssr: false
-
-    # Nutanix CVM cluster VIP/IP - used only for connectivity pre-flight check
-    # Leave empty ("") to skip the port-2074 reachability test
+    # Nutanix cluster VIP — used for port-2074 reachability pre-check
+    # Set to "" to skip
     nutanix_cvm_vip: ""
 
-    # Timeout (seconds) for the installer script
+    # Installer script timeout (seconds)
     ngt_install_timeout: 300
 
-    # Keep the staged installer after install (false = clean up /tmp)
+    # Set true to keep the staged installer in /tmp after install
     ngt_keep_installer: false
 
-    # Service name differs between older (sysv) and newer (systemd) NGT versions
-    ngt_service_name: nutanix-guest-agent
+    # systemd transient unit name (must be unique; avoid collision on re-runs)
+    ngt_systemd_unit: ngt_guest_agent_install
 
   # ---------------------------------------------------------------------------
   # PRE-FLIGHT CHECKS
   # ---------------------------------------------------------------------------
   pre_tasks:
 
-    - name: PRE-FLIGHT | Confirm target OS is RHEL-family
+    - name: PRE-FLIGHT | Assert target is RedHat-family OS
       ansible.builtin.assert:
         that:
           - ansible_os_family == "RedHat"
         fail_msg: >
-          This playbook targets RedHat-family OS only.
+          This playbook targets RedHat-family only.
           Detected: {{ ansible_os_family }} {{ ansible_distribution }} {{ ansible_distribution_version }}
-        success_msg: "OS check passed: {{ ansible_distribution }} {{ ansible_distribution_version }}"
+        success_msg: "OS OK: {{ ansible_distribution }} {{ ansible_distribution_version }}"
       tags: [preflight]
 
-    - name: PRE-FLIGHT | Check NGT installer directory exists on target
+    - name: PRE-FLIGHT | Confirm installer directory exists on target host
       ansible.builtin.stat:
         path: "{{ ngt_src_path }}"
       register: _ngt_src_stat
       tags: [preflight]
 
-    - name: PRE-FLIGHT | Fail if installer directory is missing
+    - name: PRE-FLIGHT | Fail if installer directory missing
       ansible.builtin.fail:
         msg: >
           NGT installer not found at {{ ngt_src_path }} on {{ inventory_hostname }}.
-          Please stage the installer before running this playbook.
+          Stage the installer first — see playbook header for instructions.
       when: not _ngt_src_stat.stat.exists
       tags: [preflight]
 
-    - name: PRE-FLIGHT | Check if NGT is already installed and running
+    - name: PRE-FLIGHT | Assert /usr/local is writable (Nutanix requirement)
+      ansible.builtin.file:
+        path: /usr/local
+        state: directory
+      register: _usrlocal_check
+      failed_when: false
+      tags: [preflight]
+
+    - name: PRE-FLIGHT | Fail if /usr/local is not writable
       ansible.builtin.command:
-        cmd: "rpm -q nutanix-guest-agent"
-      register: _ngt_rpm_check
+        cmd: test -w /usr/local
+      changed_when: false
+      failed_when: false
+      register: _usrlocal_writable
+      tags: [preflight]
+
+    - name: PRE-FLIGHT | Warn if /usr/local write test inconclusive
+      ansible.builtin.debug:
+        msg: "WARNING: Could not confirm /usr/local is writable. NGT installs there — ensure permissions are correct."
+      when: _usrlocal_writable.rc != 0
+      tags: [preflight]
+
+    - name: PRE-FLIGHT | Check if NGT is already installed
+      ansible.builtin.command:
+        cmd: rpm -q nutanix-guest-agent
+      register: _ngt_already_installed
       changed_when: false
       failed_when: false
       tags: [preflight]
 
-    - name: PRE-FLIGHT | Report existing NGT installation (will reinstall/upgrade)
+    - name: PRE-FLIGHT | Report existing NGT (will upgrade/reinstall)
       ansible.builtin.debug:
-        msg: >
-          NGT already installed ({{ _ngt_rpm_check.stdout | trim }}).
-          Proceeding with upgrade/reinstall.
-      when: _ngt_rpm_check.rc == 0
+        msg: "NGT already installed: {{ _ngt_already_installed.stdout | trim }}. Proceeding as upgrade."
+      when: _ngt_already_installed.rc == 0
       tags: [preflight]
 
-    - name: PRE-FLIGHT | Connectivity check to CVM port 2074
+    - name: PRE-FLIGHT | Port 2074 reachability check to CVM
       ansible.builtin.wait_for:
         host: "{{ nutanix_cvm_vip }}"
         port: 2074
@@ -83,60 +100,55 @@
     - name: PRE-FLIGHT | Warn if CVM port 2074 unreachable
       ansible.builtin.debug:
         msg: >
-          WARNING: Cannot reach {{ nutanix_cvm_vip }}:2074.
-          NGT will install but the communication link may be inactive.
-          Ensure firewall allows TCP/2074 from VM to CVM.
+          WARNING: {{ nutanix_cvm_vip }}:2074 is unreachable.
+          NGT will install but the communication link will be inactive until
+          TCP/2074 is open from this VM to the Nutanix CVM/cluster VIP.
       when:
         - nutanix_cvm_vip | length > 0
         - _cvm_port_check is failed
       tags: [preflight, connectivity]
 
   # ---------------------------------------------------------------------------
-  # DEPENDENCY INSTALLATION (per RHEL major version)
+  # DEPENDENCIES
   # ---------------------------------------------------------------------------
   tasks:
 
-    - name: DEPS | Install common NGT prerequisites
+    - name: DEPS | Install common NGT prerequisites (all RHEL versions)
       ansible.builtin.package:
         name:
           - tar
           - dmidecode
+          - lvm2
         state: present
       tags: [deps]
 
-    # RHEL 7: needs python (2.7) and lvm2
-    - name: "DEPS | RHEL 7 — install python2 and lvm2"
+    - name: "DEPS | RHEL 7 — install python2"
       ansible.builtin.package:
         name:
           - python
-          - lvm2
         state: present
       when: ansible_distribution_major_version == "7"
       tags: [deps]
 
-    # RHEL 8: chkconfig is still present but confirm; python3 default
-    - name: "DEPS | RHEL 8 — ensure chkconfig and python3 present"
+    - name: "DEPS | RHEL 8 — install chkconfig and python3"
       ansible.builtin.package:
         name:
           - chkconfig
           - python3
-          - lvm2
         state: present
       when: ansible_distribution_major_version == "8"
       tags: [deps]
 
-    # RHEL 9: chkconfig NOT shipped by default — NGT installer needs it
-    - name: "DEPS | RHEL 9 — install chkconfig (required by NGT installer)"
+    - name: "DEPS | RHEL 9 — install chkconfig (NOT shipped by default; NGT requires it)"
       ansible.builtin.package:
         name:
           - chkconfig
           - python3
-          - lvm2
         state: present
       when: ansible_distribution_major_version == "9"
       tags: [deps]
 
-    # RHEL 9 also needs /etc/init.d directory to exist (chkconfig requirement)
+    # RHEL 9: NGT installer writes to /etc/init.d which must exist
     - name: "DEPS | RHEL 9 — ensure /etc/init.d directory exists"
       ansible.builtin.file:
         path: /etc/init.d
@@ -147,142 +159,273 @@
       when: ansible_distribution_major_version == "9"
       tags: [deps]
 
+    # RHEL 8/9: NGT installer calls 'yum' internally — symlink to dnf if missing
+    - name: "DEPS | RHEL 8/9 — check if 'yum' binary exists"
+      ansible.builtin.stat:
+        path: /usr/bin/yum
+      register: _yum_stat
+      when: ansible_distribution_major_version in ["8", "9"]
+      tags: [deps]
+
+    - name: "DEPS | RHEL 8/9 — create yum → dnf symlink if yum missing"
+      ansible.builtin.file:
+        src: /usr/bin/dnf
+        dest: /usr/bin/yum
+        state: link
+      when:
+        - ansible_distribution_major_version in ["8", "9"]
+        - not _yum_stat.stat.exists
+      tags: [deps]
+
+    # Validate lvm2 version >= 2.02.109 (Nutanix hard requirement)
+    - name: DEPS | Get installed lvm2 version
+      ansible.builtin.command:
+        cmd: rpm -q --queryformat "%{VERSION}" lvm2
+      register: _lvm2_ver
+      changed_when: false
+      failed_when: false
+      tags: [deps]
+
+    - name: DEPS | Warn if lvm2 version cannot be verified
+      ansible.builtin.debug:
+        msg: >
+          WARNING: Could not verify lvm2 version (got: {{ _lvm2_ver.stdout | default('unknown') }}).
+          Nutanix requires lvm2 >= 2.02.109. Proceeding anyway.
+      when: _lvm2_ver.rc != 0
+      tags: [deps]
+
     # ---------------------------------------------------------------------------
     # INSTALLER LAYOUT DETECTION
     # ---------------------------------------------------------------------------
 
-    - name: DETECT | Check for modern RPM installer script
+    - name: DETECT | Check for modern RPM installer (AOS 6.6+)
       ansible.builtin.stat:
         path: "{{ ngt_src_path }}/linux/ngt_rpm_installer/ngt_install_upgrade.sh"
       register: _modern_installer
       tags: [detect]
 
-    - name: DETECT | Check for legacy Python installer script
+    - name: DETECT | Check for legacy shell wrapper (setup_python.sh)
       ansible.builtin.stat:
         path: "{{ ngt_src_path }}/linux/setup_python.sh"
-      register: _legacy_installer
+      register: _legacy_sh_installer
       tags: [detect]
 
-    - name: DETECT | Fail if no recognised installer found
+    - name: DETECT | Check for legacy direct Python entry point (install_ngt.py)
+      ansible.builtin.stat:
+        path: "{{ ngt_src_path }}/linux/install_ngt.py"
+      register: _legacy_py_installer
+      tags: [detect]
+
+    - name: DETECT | Fail if no recognised installer found under {{ ngt_src_path }}
       ansible.builtin.fail:
-        msg: >
+        msg: |
           No recognised NGT installer found under {{ ngt_src_path }}.
           Expected one of:
-            - {{ ngt_src_path }}/linux/ngt_rpm_installer/ngt_install_upgrade.sh  (modern)
-            - {{ ngt_src_path }}/linux/setup_python.sh  (legacy)
-          Please verify the staged package layout.
+            MODERN : {{ ngt_src_path }}/linux/ngt_rpm_installer/ngt_install_upgrade.sh
+            LEGACY : {{ ngt_src_path }}/linux/setup_python.sh
+            LEGACY : {{ ngt_src_path }}/linux/install_ngt.py
+          Verify the staged package layout and re-run.
       when:
         - not _modern_installer.stat.exists
-        - not _legacy_installer.stat.exists
+        - not _legacy_sh_installer.stat.exists
+        - not _legacy_py_installer.stat.exists
       tags: [detect]
 
-    - name: DETECT | Report which installer will be used
+    - name: DETECT | Report selected installer path
       ansible.builtin.debug:
         msg: >
-          Installer selected:
           {% if _modern_installer.stat.exists %}
-          MODERN — ngt_rpm_installer/ngt_install_upgrade.sh
+          MODERN installer selected: ngt_rpm_installer/ngt_install_upgrade.sh
+          {% elif _legacy_sh_installer.stat.exists %}
+          LEGACY shell installer selected: linux/setup_python.sh
           {% else %}
-          LEGACY — linux/setup_python.sh
+          LEGACY python installer selected: linux/install_ngt.py
           {% endif %}
       tags: [detect]
 
     # ---------------------------------------------------------------------------
-    # INSTALL — MODERN PATH (AOS 6.6+, ngt_install_upgrade.sh via systemd-run)
+    # PRE-INSTALL CLEANUP — avoid systemd unit name collision on re-runs
     # ---------------------------------------------------------------------------
 
-    - name: INSTALL | Modern — set execute bit on installer script
+    - name: PREINSTALL | Stop and reset any lingering NGT systemd transient unit
+      ansible.builtin.command:
+        cmd: "systemctl reset-failed {{ ngt_systemd_unit }}"
+      changed_when: false
+      failed_when: false
+      tags: [install]
+
+    # ---------------------------------------------------------------------------
+    # INSTALL — MODERN (ngt_install_upgrade.sh via systemd-run)
+    # ---------------------------------------------------------------------------
+
+    - name: INSTALL | Modern — set execute bit
       ansible.builtin.file:
         path: "{{ ngt_src_path }}/linux/ngt_rpm_installer/ngt_install_upgrade.sh"
         mode: "0755"
       when: _modern_installer.stat.exists
       tags: [install]
 
-    - name: INSTALL | Modern — run ngt_install_upgrade.sh via systemd-run
+    - name: INSTALL | Modern — launch installer via systemd-run
       ansible.builtin.command:
         cmd: >
           systemd-run
-          --unit=ngt_guest_agent_install
+          --unit={{ ngt_systemd_unit }}
           --slice=ngt_install
           sh {{ ngt_src_path }}/linux/ngt_rpm_installer/ngt_install_upgrade.sh
         chdir: "{{ ngt_src_path }}/linux/ngt_rpm_installer"
-      register: _modern_install_result
+      register: _modern_launch
       when: _modern_installer.stat.exists
-      changed_when: _modern_install_result.rc == 0
-      async: "{{ ngt_install_timeout }}"
-      poll: 10
+      changed_when: true
       tags: [install]
 
-    - name: INSTALL | Modern — wait for systemd unit to complete
+    - name: INSTALL | Modern — wait for systemd unit to finish (poll every 10s)
       ansible.builtin.command:
-        cmd: systemctl is-active ngt_guest_agent_install
-      register: _unit_status
-      retries: 30
+        cmd: "systemctl is-active {{ ngt_systemd_unit }}"
+      register: _unit_active
+      retries: "{{ (ngt_install_timeout / 10) | int }}"
       delay: 10
-      until: _unit_status.stdout in ['inactive', 'failed']
+      until: _unit_active.stdout in ['inactive', 'failed', 'dead']
       changed_when: false
       failed_when: false
       when: _modern_installer.stat.exists
       tags: [install]
 
-    - name: INSTALL | Modern — check systemd unit exit code
+    - name: INSTALL | Modern — check unit exit status (must be 0)
       ansible.builtin.command:
-        cmd: systemctl show ngt_guest_agent_install --property=ExecMainStatus
-      register: _unit_exit
+        cmd: "systemctl show {{ ngt_systemd_unit }} --property=ExecMainStatus"
+      register: _unit_exit_code
       changed_when: false
-      failed_when: >
-        _unit_exit.stdout is defined and
-        'ExecMainStatus=0' not in _unit_exit.stdout
       when: _modern_installer.stat.exists
       tags: [install]
 
+    - name: INSTALL | Modern — fail if installer exited non-zero
+      ansible.builtin.fail:
+        msg: >
+          NGT installer (systemd unit {{ ngt_systemd_unit }}) exited with non-zero status:
+          {{ _unit_exit_code.stdout }}.
+          Check /tmp/ngt_install_log_*.txt on the host for details.
+      when:
+        - _modern_installer.stat.exists
+        - "'ExecMainStatus=0' not in _unit_exit_code.stdout"
+      tags: [install]
+
     # ---------------------------------------------------------------------------
-    # INSTALL — LEGACY PATH (setup_python.sh)
+    # INSTALL — LEGACY shell wrapper (setup_python.sh)
     # ---------------------------------------------------------------------------
 
-    - name: INSTALL | Legacy — set execute bit on setup_python.sh
+    - name: INSTALL | Legacy-sh — set execute bit on setup_python.sh
       ansible.builtin.file:
         path: "{{ ngt_src_path }}/linux/setup_python.sh"
         mode: "0755"
       when:
         - not _modern_installer.stat.exists
-        - _legacy_installer.stat.exists
+        - _legacy_sh_installer.stat.exists
       tags: [install]
 
-    - name: INSTALL | Legacy — run setup_python.sh
+    - name: INSTALL | Legacy-sh — run setup_python.sh
       ansible.builtin.shell:
-        cmd: "bash setup_python.sh"
+        cmd: bash setup_python.sh
         chdir: "{{ ngt_src_path }}/linux"
-      register: _legacy_install_result
+      register: _legacy_sh_result
       when:
         - not _modern_installer.stat.exists
-        - _legacy_installer.stat.exists
-      changed_when: "'Successfully installed' in _legacy_install_result.stdout"
-      failed_when: _legacy_install_result.rc != 0
+        - _legacy_sh_installer.stat.exists
+      changed_when: "'Successfully installed' in _legacy_sh_result.stdout"
+      failed_when: _legacy_sh_result.rc != 0
       async: "{{ ngt_install_timeout }}"
       poll: 10
       tags: [install]
 
-    - name: INSTALL | Legacy — print installer output
+    - name: INSTALL | Legacy-sh — print installer output
       ansible.builtin.debug:
-        var: _legacy_install_result.stdout_lines
+        var: _legacy_sh_result.stdout_lines
       when:
         - not _modern_installer.stat.exists
-        - _legacy_installer.stat.exists
+        - _legacy_sh_installer.stat.exists
       tags: [install]
+
+    # ---------------------------------------------------------------------------
+    # INSTALL — LEGACY direct Python (install_ngt.py)
+    # ---------------------------------------------------------------------------
+
+    - name: INSTALL | Legacy-py — find available python binary
+      ansible.builtin.command:
+        cmd: "which python3 || which python"
+      register: _python_bin
+      changed_when: false
+      when:
+        - not _modern_installer.stat.exists
+        - not _legacy_sh_installer.stat.exists
+        - _legacy_py_installer.stat.exists
+      tags: [install]
+
+    - name: INSTALL | Legacy-py — run install_ngt.py
+      ansible.builtin.command:
+        cmd: "{{ _python_bin.stdout | trim }} {{ ngt_src_path }}/linux/install_ngt.py"
+        chdir: "{{ ngt_src_path }}/linux"
+      register: _legacy_py_result
+      when:
+        - not _modern_installer.stat.exists
+        - not _legacy_sh_installer.stat.exists
+        - _legacy_py_installer.stat.exists
+      changed_when: "'Successfully installed' in _legacy_py_result.stdout"
+      failed_when: _legacy_py_result.rc != 0
+      async: "{{ ngt_install_timeout }}"
+      poll: 10
+      tags: [install]
+
+    - name: INSTALL | Legacy-py — print installer output
+      ansible.builtin.debug:
+        var: _legacy_py_result.stdout_lines
+      when:
+        - not _modern_installer.stat.exists
+        - not _legacy_sh_installer.stat.exists
+        - _legacy_py_installer.stat.exists
+      tags: [install]
+
+    # ---------------------------------------------------------------------------
+    # FETCH INSTALLER LOG ON FAILURE (all paths)
+    # ---------------------------------------------------------------------------
+
+    - name: DIAGNOSE | Find NGT install log in /tmp (if present)
+      ansible.builtin.find:
+        paths: /tmp
+        patterns: "ngt_install_log_*.txt"
+        age: "-5m"
+      register: _ngt_logs
+      changed_when: false
+      failed_when: false
+      tags: [install, diagnose]
+
+    - name: DIAGNOSE | Show installer log content
+      ansible.builtin.command:
+        cmd: "cat {{ item.path }}"
+      loop: "{{ _ngt_logs.files }}"
+      register: _log_content
+      changed_when: false
+      failed_when: false
+      when: _ngt_logs.files | length > 0
+      tags: [install, diagnose]
+
+    - name: DIAGNOSE | Print installer log
+      ansible.builtin.debug:
+        msg: "{{ item.stdout_lines }}"
+      loop: "{{ _log_content.results | default([]) }}"
+      when: _ngt_logs.files | length > 0
+      tags: [install, diagnose]
 
     # ---------------------------------------------------------------------------
     # SERVICE MANAGEMENT
     # ---------------------------------------------------------------------------
 
-    - name: SERVICE | Pause briefly for service registration to settle
+    - name: SERVICE | Wait for service registration to settle
       ansible.builtin.pause:
         seconds: 10
       tags: [service]
 
-    - name: SERVICE | Enable and start nutanix-guest-agent (systemd)
+    - name: SERVICE | Enable and start nutanix-guest-agent (systemd unit name)
       ansible.builtin.systemd:
-        name: "{{ ngt_service_name }}"
+        name: nutanix-guest-agent
         enabled: true
         state: started
         daemon_reload: true
@@ -290,22 +433,22 @@
       failed_when: false
       tags: [service]
 
-    # Fallback: older installs use SysV-style ngt_guest_agent service name
-    - name: SERVICE | Fallback — try legacy sysv service name if systemd unit missing
+    - name: SERVICE | Fallback — try legacy SysV service name 'ngt_guest_agent'
       ansible.builtin.service:
         name: ngt_guest_agent
         enabled: true
         state: started
-      when: _svc_systemd is failed or _svc_systemd.status is not defined
+      when: _svc_systemd is failed or (_svc_systemd.status is defined and _svc_systemd.status.ActiveState is not defined)
+      failed_when: false
       tags: [service]
 
     # ---------------------------------------------------------------------------
     # VALIDATION
     # ---------------------------------------------------------------------------
 
-    - name: VALIDATE | Verify nutanix-guest-agent RPM is installed
+    - name: VALIDATE | Confirm nutanix-guest-agent RPM is installed
       ansible.builtin.command:
-        cmd: "rpm -q nutanix-guest-agent"
+        cmd: rpm -q nutanix-guest-agent
       register: _rpm_verify
       changed_when: false
       failed_when: _rpm_verify.rc != 0
@@ -316,9 +459,9 @@
         msg: "Installed: {{ _rpm_verify.stdout | trim }}"
       tags: [validate]
 
-    - name: VALIDATE | Check nutanix-guest-agent service status
+    - name: VALIDATE | Get service status
       ansible.builtin.command:
-        cmd: "systemctl status {{ ngt_service_name }} --no-pager"
+        cmd: systemctl status nutanix-guest-agent --no-pager
       register: _svc_status
       changed_when: false
       failed_when: false
@@ -328,27 +471,52 @@
       ansible.builtin.assert:
         that:
           - "'active (running)' in _svc_status.stdout"
-        fail_msg: >
+        fail_msg: |
           nutanix-guest-agent is NOT running on {{ inventory_hostname }}.
-          Status output:
+          Status:
           {{ _svc_status.stdout }}
-        success_msg: "nutanix-guest-agent is active and running."
+        success_msg: "nutanix-guest-agent is active and running on {{ inventory_hostname }}."
       tags: [validate]
 
-    - name: VALIDATE | Confirm communication socket exists
+    - name: VALIDATE | Check NGT runtime directory exists (/var/nutanix/ngt/)
       ansible.builtin.stat:
         path: /var/nutanix/ngt/
       register: _ngt_dir
       tags: [validate]
 
-    - name: VALIDATE | Warn if NGT runtime directory missing
+    - name: VALIDATE | Warn if NGT runtime directory not yet created
       ansible.builtin.debug:
         msg: >
-          WARNING: /var/nutanix/ngt/ not found.
-          The agent may still be initialising, or communication with
-          the CVM has not established yet. Check Prism for link status.
+          NOTE: /var/nutanix/ngt/ not yet present — the agent may still be
+          initialising its first connection to the CVM. Check Prism for
+          'Communication Link Active: true' after a few minutes.
       when: not _ngt_dir.stat.exists
       tags: [validate]
+
+    # ---------------------------------------------------------------------------
+    # NO-REBOOT ASSERTION
+    # ---------------------------------------------------------------------------
+
+    - name: REBOOT-CHECK | Run needs-restarting to detect pending reboot
+      ansible.builtin.command:
+        cmd: needs-restarting -r
+      register: _reboot_needed
+      changed_when: false
+      failed_when: false
+      tags: [validate, reboot_check]
+
+    - name: REBOOT-CHECK | Assert NO reboot is required after NGT install
+      ansible.builtin.assert:
+        that:
+          - _reboot_needed.rc == 0
+        fail_msg: >
+          ATTENTION: The system flags a pending reboot on {{ inventory_hostname }}
+          (likely from a prior kernel/package update, NOT from NGT itself).
+          NGT is installed and running — but you should schedule a maintenance
+          window to reboot this host for the pending kernel/library updates.
+        success_msg: "No reboot required on {{ inventory_hostname }}."
+      when: _reboot_needed.rc is defined
+      tags: [validate, reboot_check]
 
     # ---------------------------------------------------------------------------
     # CLEANUP
@@ -361,12 +529,11 @@
       when: not ngt_keep_installer
       tags: [cleanup]
 
-    - name: CLEANUP | Remove systemd transient unit file (if created)
+    - name: CLEANUP | Reset lingering systemd transient unit
       ansible.builtin.command:
-        cmd: systemctl reset-failed ngt_guest_agent_install
+        cmd: "systemctl reset-failed {{ ngt_systemd_unit }}"
       changed_when: false
       failed_when: false
-      when: _modern_installer.stat.exists
       tags: [cleanup]
 
   # ---------------------------------------------------------------------------
@@ -378,15 +545,17 @@
       ansible.builtin.debug:
         msg: |
           ============================================================
-          Nutanix Guest Tools installation summary
+          Nutanix Guest Tools (NGT) — Installation Summary
           ------------------------------------------------------------
           Host            : {{ inventory_hostname }}
           OS              : {{ ansible_distribution }} {{ ansible_distribution_version }}
           Package         : {{ _rpm_verify.stdout | default('unknown') | trim }}
-          Service state   : {{ _svc_status.stdout | regex_search('Active:.*') | default('see above') }}
-          NGT data dir    : {{ '/var/nutanix/ngt/ EXISTS' if _ngt_dir.stat.exists else 'NOT YET CREATED' }}
+          Service active  : {{ 'YES' if 'active (running)' in (_svc_status.stdout | default('')) else 'CHECK MANUALLY' }}
+          NGT data dir    : {{ '/var/nutanix/ngt/ EXISTS' if _ngt_dir.stat.exists else 'NOT YET CREATED (may need ~1 min)' }}
+          Reboot pending  : {{ 'NO' if (_reboot_needed.rc | default(1)) == 0 else 'YES (pre-existing, not from NGT)' }}
           ------------------------------------------------------------
-          Next step: Verify in Prism Central/Element that
-          "Communication Link Active" = true for this VM.
+          NEXT STEP: In Prism Central/Element, verify this VM shows:
+            NGT Enabled              : true
+            Communication Link Active: true
           ============================================================
       tags: [summary]
