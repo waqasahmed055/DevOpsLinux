@@ -1,0 +1,36 @@
+---
+- name: Copy and extract ZIP file on RHEL servers
+  hosts: all
+  become: true
+  gather_facts: false
+
+  vars:
+    zip_name: application.zip
+    local_zip: "/tmp/{{ zip_name }}"
+    remote_zip: "/tmp/{{ zip_name }}"
+    extract_dir: "/tmp/application"
+
+  tasks:
+    - name: Ensure unzip is installed
+      ansible.builtin.package:
+        name: unzip
+        state: present
+
+    - name: Ensure extraction directory exists
+      ansible.builtin.file:
+        path: "{{ extract_dir }}"
+        state: directory
+        mode: "0755"
+
+    - name: Copy ZIP file to remote server
+      ansible.builtin.copy:
+        src: "{{ local_zip }}"
+        dest: "{{ remote_zip }}"
+        mode: "0644"
+
+    - name: Extract ZIP file
+      ansible.builtin.unarchive:
+        src: "{{ remote_zip }}"
+        dest: "{{ extract_dir }}"
+        remote_src: true
+        creates: "{{ extract_dir }}/install.sh"
