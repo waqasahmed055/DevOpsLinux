@@ -1,0 +1,33 @@
+---
+- name: Remove SUID/SGID bits from Nagios script
+  hosts: all_servers                # Replace with your host group or use 'all'
+  become: yes                       # Required to change file permissions
+  gather_facts: no                  # Not strictly needed for this task, but you can set to yes if needed
+
+  tasks:
+    - name: Define the script path
+      set_fact:
+        script_path: "/usr/local/nagios/libexec/check_init_service"
+
+    - name: Check if the script exists
+      stat:
+        path: "{{ script_path }}"
+      register: script_stat
+
+    - name: Remove SUID and SGID bits (if file exists)
+      file:
+        path: "{{ script_path }}"
+        mode: "u-s,g-s"             # Removes setuid and setgid; preserves other permissions
+        state: file
+      when: script_stat.stat.exists
+
+    - name: Verify final permissions
+      command: "ls -l {{ script_path }}"
+      register: perm_check
+      when: script_stat.stat.exists
+      changed_when: false
+
+    - name: Display updated permissions
+      debug:
+        msg: "{{ perm_check.stdout }}"
+      when: script_stat.stat.exists
