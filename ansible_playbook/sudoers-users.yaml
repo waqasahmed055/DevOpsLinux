@@ -1,0 +1,80 @@
+---
+- name: Collect sudo configuration from Linux servers
+  hosts: all
+  become: true
+  gather_facts: true
+
+  vars:
+    report_dir: reports
+
+  tasks:
+
+    - name: Create local report directory
+      delegate_to: localhost
+      become: false
+      file:
+        path: "{{ report_dir }}"
+        state: directory
+        mode: "0755"
+      run_once: true
+
+    - name: Read /etc/sudoers
+      shell: |
+        grep -Ev '^(#|$|Defaults)' /etc/sudoers || true
+      register: sudoers
+
+    - name: Read sudoers.d files
+      shell: |
+        if [ -d /etc/sudoers.d ]; then
+          for f in /etc/sudoers.d/*; do
+            [ -f "$f" ] || continue
+            echo "===== $f ====="
+            grep -Ev '^(#|$|Defaults)' "$f" || true
+            echo
+          done
+        fi
+      register: sudoers_d
+
+    - name: Get sudo group members
+      shell: |
+        groups=$( (grep -hE '^%' /etc/sudoers /etc/sudoers.d/* 2>/dev/null || true) \
+          | awk '{print $1}' \
+          | sed 's/^%//' \
+          | sort -u )
+
+        for g in $groups
+        do
+            echo "Group: $g"
+            getent group "$g"
+            echo
+        done
+      register: group_members
+
+    - name: Save report
+      delegate_to: localhost
+      become: false
+      copy:
+        dest: "{{ report_dir }}/{{ inventory_hostname }}.txt"
+        content: |
+
+          Hostname: {{ inventory_hostname }}
+          OS: {{ ansible_distribution }} {{ ansible_distribution_major_version }}
+          Environment: {{ group_names | join(', ') }}
+
+          ============================================
+          /etc/sudoers
+          ============================================
+
+          {{ sudoers.stdout }}
+
+          ============================================
+          /etc/sudoers.d
+          ============================================
+
+          {{ sudoers_d.stdout }}
+
+          ============================================
+          Group Memberships
+          ============================================
+
+          {{ group_members.stdout }}
