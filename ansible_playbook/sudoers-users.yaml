@@ -1,11 +1,11 @@
 ---
-- name: Collect sudo configuration from Linux servers
-  hosts: all
+- name: Audit sudo configuration on Linux servers
+  hosts: linux_servers
   become: true
   gather_facts: true
 
   vars:
-    report_dir: reports
+    local_report_dir: "./sudoers_audit_reports"
 
   tasks:
 
@@ -13,68 +13,199 @@
       delegate_to: localhost
       become: false
       file:
-        path: "{{ report_dir }}"
+        path: "{{ local_report_dir }}"
         state: directory
         mode: "0755"
       run_once: true
 
+    #################################################################
+    # Validate sudoers
+    #################################################################
+
+    - name: Validate sudoers syntax
+      command: visudo -c
+      register: visudo_check
+      changed_when: false
+      failed_when: false
+
+    #################################################################
+    # Collect sudoers files
+    #################################################################
+
     - name: Read /etc/sudoers
-      shell: |
-        grep -Ev '^(#|$|Defaults)' /etc/sudoers || true
-      register: sudoers
+      shell: cat /etc/sudoers
+      register: sudoers_file
+      changed_when: false
+
+    - name: Find files under /etc/sudoers.d
+      find:
+        paths: /etc/sudoers.d
+        file_type: file
+      register: sudoers_d_files
 
     - name: Read sudoers.d files
       shell: |
-        if [ -d /etc/sudoers.d ]; then
-          for f in /etc/sudoers.d/*; do
-            [ -f "$f" ] || continue
-            echo "===== $f ====="
-            grep -Ev '^(#|$|Defaults)' "$f" || true
-            echo
-          done
-        fi
-      register: sudoers_d
+        echo "===== {{ item.path }} ====="
+        cat "{{ item.path }}"
+        echo
+      loop: "{{ sudoers_d_files.files }}"
+      register: sudoers_d_contents
+      changed_when: false
 
-    - name: Get sudo group members
+    #################################################################
+    # Extract direct users
+    #################################################################
+
+    - name: Find direct user sudo entries
       shell: |
-        groups=$( (grep -hE '^%' /etc/sudoers /etc/sudoers.d/* 2>/dev/null || true) \
-          | awk '{print $1}' \
-          | sed 's/^%//' \
-          | sort -u )
+        grep -hvE '^(#|$|Defaults|User_Alias|Runas_Alias|Host_Alias|Cmnd_Alias|%|@include|#include)' \
+        /etc/sudoers /etc/sudoers.d/* 2>/dev/null \
+        | awk '{print $1}' \
+        | sort -u
+      args:
+        executable: /bin/bash
+      register: sudo_users
+      changed_when: false
 
-        for g in $groups
+    #################################################################
+    # Extract sudo groups
+    #################################################################
+
+    - name: Find sudo groups
+      shell: |
+        grep -hE '^%' /etc/sudoers /etc/sudoers.d/* 2>/dev/null \
+        | awk '{print $1}' \
+        | sed 's/^%//' \
+        | sort -u
+      args:
+        executable: /bin/bash
+      register: sudo_groups
+      changed_when: false
+
+    #################################################################
+    # Expand group membership
+    #################################################################
+
+    - name: Get members of sudo groups
+      shell: |
+        for g in {{ sudo_groups.stdout_lines | join(' ') }}
         do
-            echo "Group: $g"
-            getent group "$g"
-            echo
+          echo "Group: $g"
+          getent group "$g"
+          echo
         done
+      args:
+        executable: /bin/bash
       register: group_members
+      changed_when: false
+      when: sudo_groups.stdout != ""
 
-    - name: Save report
+    #################################################################
+    # Detect NOPASSWD
+    #################################################################
+
+    - name: Find NOPASSWD entries
+      shell: |
+        grep -RH "NOPASSWD" /etc/sudoers /etc/sudoers.d 2>/dev/null || true
+      register: nopasswd_entries
+      changed_when: false
+
+    #################################################################
+    # Build report
+    #################################################################
+
+    - name: Create audit report
       delegate_to: localhost
       become: false
       copy:
-        dest: "{{ report_dir }}/{{ inventory_hostname }}.txt"
+        dest: "{{ local_report_dir }}/{{ inventory_hostname }}.txt"
+        mode: "0644"
         content: |
+          ===========================================================
+          SUDO AUDIT REPORT
+          ===========================================================
 
-          Hostname: {{ inventory_hostname }}
-          OS: {{ ansible_distribution }} {{ ansible_distribution_major_version }}
-          Environment: {{ group_names | join(', ') }}
+          Hostname       : {{ ansible_hostname }}
+          FQDN           : {{ ansible_fqdn }}
+          Inventory Name : {{ inventory_hostname }}
+          Environment    : {{ group_names | join(', ') }}
 
-          ============================================
+          OS             : {{ ansible_distribution }} {{ ansible_distribution_version }}
+          Kernel         : {{ ansible_kernel }}
+
+          ===========================================================
+          visudo Validation
+          ===========================================================
+
+          Return Code : {{ visudo_check.rc }}
+
+          {{ visudo_check.stdout }}
+
+          {{ visudo_check.stderr }}
+
+          ===========================================================
           /etc/sudoers
-          ============================================
+          ===========================================================
 
-          {{ sudoers.stdout }}
+          {{ sudoers_file.stdout }}
 
-          ============================================
+          ===========================================================
           /etc/sudoers.d
-          ============================================
+          ===========================================================
 
-          {{ sudoers_d.stdout }}
+          {% for item in sudoers_d_contents.results %}
+          {{ item.stdout }}
 
-          ============================================
-          Group Memberships
-          ============================================
+          {% endfor %}
 
+          ===========================================================
+          Direct User Entries
+          ===========================================================
+
+          {% if sudo_users.stdout %}
+          {{ sudo_users.stdout }}
+          {% else %}
+          None
+          {% endif %}
+
+          ===========================================================
+          Sudo Groups
+          ===========================================================
+
+          {% if sudo_groups.stdout %}
+          {{ sudo_groups.stdout }}
+          {% else %}
+          None
+          {% endif %}
+
+          ===========================================================
+          Members of Sudo Groups
+          ===========================================================
+
+          {% if group_members is defined %}
           {{ group_members.stdout }}
+          {% else %}
+          None
+          {% endif %}
+
+          ===========================================================
+          NOPASSWD Entries
+          ===========================================================
+
+          {% if nopasswd_entries.stdout %}
+          {{ nopasswd_entries.stdout }}
+          {% else %}
+          None
+          {% endif %}
+
+    #################################################################
+    # Summary
+    #################################################################
+
+    - name: Print summary
+      debug:
+        msg:
+          - "Host: {{ inventory_hostname }}"
+          - "Environment: {{ group_names | join(', ') }}"
+          - "Direct Users: {{ sudo_users.stdout_lines | default([]) }}"
+          - "Sudo Groups: {{ sudo_groups.stdout_lines | default([]) }}"
