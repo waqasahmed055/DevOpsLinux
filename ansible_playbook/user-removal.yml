@@ -18,7 +18,7 @@
 # =============================================================================
 
 - name: Remove former contractor accounts from Dobo research servers
-  hosts: dobo_research
+  hosts: dobolabs-1
   become: true
   gather_facts: true
 
@@ -88,7 +88,7 @@
         path: /etc/sudoers
         regexp: "{{ item.item }}"
         state: absent
-      validate: '/usr/sbin/visudo -cf %s'
+        validate: '/usr/sbin/visudo -cf %s'
       loop: "{{ contractor_lookup.results }}"
       loop_control:
         label: "{{ item.item }}"
