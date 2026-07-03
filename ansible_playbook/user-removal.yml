@@ -1,0 +1,114 @@
+---
+# =============================================================================
+# Playbook : remove_contractor_accounts.yml
+# Purpose  : Remove former-contractor accounts from the Dobo research servers.
+#              1. Backup /etc/sudoers (and /etc/sudoers.d) BEFORE any change
+#              2. For each user in contractor_users:
+#                   - Check if the account exists on this host (dynamic,
+#                     handles hosts where the user is already absent, e.g.
+#                     ctr-usman on xenon)
+#                   - If it exists: strip its /etc/sudoers entry, then
+#                     userdel -r the account
+#                   - If not: report and skip - no error
+#
+# Usage    : ansible-playbook -i inventory.ini remove_contractor_accounts.yml
+#            (override the user list ad-hoc if needed:)
+#            ansible-playbook -i inventory.ini remove_contractor_accounts.yml \
+#              -e '{"contractor_users":["ctr-adam","ctr-usman"]}'
+# =============================================================================
+
+- name: Remove former contractor accounts from Dobo research servers
+  hosts: dobo_research
+  become: true
+  gather_facts: true
+
+  vars:
+    contractor_users:
+      - ctr-adam
+      - ctr-usman
+    sudoers_backup_dir: "/root/sudoers_backups"
+
+  tasks:
+
+    # -------------------------------------------------------------------
+    # 1. Backup sudoers first, unconditionally, before touching anything
+    # -------------------------------------------------------------------
+    - name: Ensure local backup directory exists
+      ansible.builtin.file:
+        path: "{{ sudoers_backup_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+
+    - name: Backup /etc/sudoers before making any changes
+      ansible.builtin.copy:
+        src: /etc/sudoers
+        dest: "{{ sudoers_backup_dir }}/sudoers_{{ inventory_hostname }}_{{ ansible_date_time.iso8601_basic_short }}.bak"
+        remote_src: true
+        owner: root
+        group: root
+        mode: '0440'
+      register: sudoers_backup
+
+    - name: Backup /etc/sudoers.d directory (drop-in files)
+      ansible.builtin.archive:
+        path: /etc/sudoers.d
+        dest: "{{ sudoers_backup_dir }}/sudoers.d_{{ inventory_hostname }}_{{ ansible_date_time.iso8601_basic_short }}.tar.gz"
+        format: gz
+      ignore_errors: true
+
+    - name: Confirm sudoers backup was created
+      ansible.builtin.debug:
+        msg: "Sudoers backed up to {{ sudoers_backup.dest }}"
+
+    # -------------------------------------------------------------------
+    # 2. Process each contractor account dynamically
+    # -------------------------------------------------------------------
+    - name: Check which contractor accounts exist on this host
+      ansible.builtin.getent:
+        database: passwd
+        key: "{{ item }}"
+      register: contractor_lookup
+      ignore_errors: true
+      loop: "{{ contractor_users }}"
+      loop_control:
+        label: "{{ item }}"
+
+    - name: Report accounts that don't exist on this host (nothing to do)
+      ansible.builtin.debug:
+        msg: "Account '{{ item.item }}' does not exist on {{ inventory_hostname }}. Skipping."
+      loop: "{{ contractor_lookup.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      when: item is failed
+
+    - name: Remove sudoers entry for each existing contractor account
+      ansible.builtin.lineinfile:
+        path: /etc/sudoers
+        regexp: "{{ item.item }}"
+        state: absent
+      validate: '/usr/sbin/visudo -cf %s'
+      loop: "{{ contractor_lookup.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      when: item is succeeded
+
+    - name: Delete each existing contractor account (userdel -r equivalent)
+      ansible.builtin.user:
+        name: "{{ item.item }}"
+        state: absent
+        remove: true
+        force: true
+      loop: "{{ contractor_lookup.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      when: item is succeeded
+
+    - name: Confirm removals on this host
+      ansible.builtin.debug:
+        msg: "Removed '{{ item.item }}' (sudoers entry + account) from {{ inventory_hostname }}."
+      loop: "{{ contractor_lookup.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      when: item is succeeded
