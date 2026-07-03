@@ -1,0 +1,114 @@
+---
+# =============================================================================
+# Playbook : upgrade_cohesity_agent.yml
+# Purpose  : Upgrade the Cohesity backup agent on remote servers where it is
+#            already installed.
+#              1. Report the currently installed version (before change)
+#              2. Copy the new RPM package to /tmp on each remote host
+#              3. Run an rpm upgrade transaction (idempotent - no-op if the
+#                 target version is already installed)
+#              4. Report the version after upgrade and restart the agent
+#                 service only if the package actually changed
+#              5. Clean up the RPM from /tmp
+#
+# Usage    : ansible-playbook -i inventory upgrade_cohesity_agent.yml \
+#              -e "cohesity_rpm_local_path=/path/to/cohesity-agent-x.y.z.rpm"
+#
+# Adjust before running:
+#   - hosts: group name below to match the servers with the agent installed
+#   - cohesity_package_name / cohesity_service_name if they differ in your env
+# =============================================================================
+
+- name: Upgrade Cohesity agent on remote servers
+  hosts: cohesity         # <-- change to your actual inventory group
+  become: true
+  gather_facts: true
+
+  vars:
+    cohesity_rpm_local_path: ""              # REQUIRED - path on the control node
+    cohesity_remote_tmp_dir: "/tmp"
+    cohesity_package_name: "cohesity-agent"  # adjust if the RPM's package name differs
+    cohesity_service_name: "cohesity-agent"  # adjust to the actual systemd unit name
+
+  tasks:
+
+    - name: Fail fast if cohesity_rpm_local_path was not supplied
+      ansible.builtin.fail:
+        msg: "cohesity_rpm_local_path is required. Run with: -e \"cohesity_rpm_local_path=/path/to/rpm\""
+      when: cohesity_rpm_local_path | length == 0
+
+    - name: Set remote RPM filename fact
+      ansible.builtin.set_fact:
+        cohesity_rpm_filename: "{{ cohesity_rpm_local_path | basename }}"
+
+    - name: Query target RPM version from the local package file
+      ansible.builtin.command: "rpm -qp --qf %{VERSION}-%{RELEASE} {{ cohesity_rpm_local_path }}"
+      delegate_to: localhost
+      become: false
+      run_once: true
+      register: target_rpm_version
+      changed_when: false
+
+    - name: Check currently installed package versions
+      ansible.builtin.package_facts:
+        manager: rpm
+
+    - name: Report currently installed version
+      ansible.builtin.debug:
+        msg: >-
+          {{ inventory_hostname }}: currently installed
+          {{ ansible_facts.packages[cohesity_package_name][0].version + '-' + ansible_facts.packages[cohesity_package_name][0].release
+             if cohesity_package_name in ansible_facts.packages else 'NOT INSTALLED' }}
+          -> target {{ target_rpm_version.stdout }}
+
+    - name: Copy Cohesity agent RPM to remote /tmp directory
+      ansible.builtin.copy:
+        src: "{{ cohesity_rpm_local_path }}"
+        dest: "{{ cohesity_remote_tmp_dir }}/{{ cohesity_rpm_filename }}"
+        owner: root
+        group: root
+        mode: '0644'
+      register: rpm_copy
+
+    - name: Check if dnf is available on this host
+      ansible.builtin.stat:
+        path: /usr/bin/dnf
+      register: dnf_check
+
+    - name: Upgrade Cohesity agent package using dnf
+      ansible.builtin.dnf:
+        name: "{{ cohesity_remote_tmp_dir }}/{{ cohesity_rpm_filename }}"
+        state: present
+        disable_gpg_check: true   # remove if the RPM is signed with an imported key
+      register: cohesity_upgrade_dnf
+      when: dnf_check.stat.exists
+      notify: Restart cohesity agent service
+
+    - name: Upgrade Cohesity agent package using yum (fallback - dnf not present)
+      ansible.builtin.yum:
+        name: "{{ cohesity_remote_tmp_dir }}/{{ cohesity_rpm_filename }}"
+        state: present
+        disable_gpg_check: true   # remove if the RPM is signed with an imported key
+      register: cohesity_upgrade_yum
+      when: not dnf_check.stat.exists
+      notify: Restart cohesity agent service
+
+    - name: Re-check installed version after upgrade
+      ansible.builtin.package_facts:
+        manager: rpm
+
+    - name: Report version after upgrade
+      ansible.builtin.debug:
+        msg: "{{ inventory_hostname }}: now running {{ ansible_facts.packages[cohesity_package_name][0].version }}-{{ ansible_facts.packages[cohesity_package_name][0].release }}"
+
+    - name: Clean up RPM from /tmp
+      ansible.builtin.file:
+        path: "{{ cohesity_remote_tmp_dir }}/{{ cohesity_rpm_filename }}"
+        state: absent
+
+  handlers:
+    - name: Restart cohesity agent service
+      ansible.builtin.systemd:
+        name: "{{ cohesity_service_name }}"
+        state: restarted
+        enabled: true
