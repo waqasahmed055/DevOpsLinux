@@ -1,59 +1,39 @@
 ---
-- name: Audit sudo configuration on Linux servers
+# Single-file sudo audit -> Excel report.
+# Everything is embedded here - no external .j2 template or .py script needed.
+#
+# Usage:
+#   ansible-playbook -i inventory sudoers_audit_excel_single.yml
+#
+# Output:
+#   ./sudoers_audit_reports/json/<host>.json        (intermediate, one per host)
+#   ./sudoers_audit_reports/sudo_audit_report.xlsx   (final Excel report)
+
+- name: Audit sudo users and groups on Linux servers
   hosts: linux_servers
   become: true
   gather_facts: true
 
   vars:
     local_report_dir: "./sudoers_audit_reports"
+    local_json_dir: "{{ local_report_dir }}/json"
 
   tasks:
 
-    - name: Create local report directory
+    - name: Create local report/json directories
       delegate_to: localhost
       become: false
       file:
-        path: "{{ local_report_dir }}"
+        path: "{{ item }}"
         state: directory
         mode: "0755"
+      loop:
+        - "{{ local_report_dir }}"
+        - "{{ local_json_dir }}"
       run_once: true
 
     #################################################################
-    # Validate sudoers
-    #################################################################
-
-    - name: Validate sudoers syntax
-      command: visudo -c
-      register: visudo_check
-      changed_when: false
-      failed_when: false
-
-    #################################################################
-    # Collect sudoers files
-    #################################################################
-
-    - name: Read /etc/sudoers
-      shell: cat /etc/sudoers
-      register: sudoers_file
-      changed_when: false
-
-    - name: Find files under /etc/sudoers.d
-      find:
-        paths: /etc/sudoers.d
-        file_type: file
-      register: sudoers_d_files
-
-    - name: Read sudoers.d files
-      shell: |
-        echo "===== {{ item.path }} ====="
-        cat "{{ item.path }}"
-        echo
-      loop: "{{ sudoers_d_files.files }}"
-      register: sudoers_d_contents
-      changed_when: false
-
-    #################################################################
-    # Extract direct users
+    # Direct user sudo entries
     #################################################################
 
     - name: Find direct user sudo entries
@@ -68,7 +48,7 @@
       changed_when: false
 
     #################################################################
-    # Extract sudo groups
+    # Sudo groups
     #################################################################
 
     - name: Find sudo groups
@@ -83,120 +63,49 @@
       changed_when: false
 
     #################################################################
-    # Expand group membership
+    # Expand group membership (one getent call per group, in order,
+    # so results line up with sudo_groups.stdout_lines by index)
     #################################################################
 
-    - name: Get members of sudo groups
+    - name: Get members of each sudo group
       shell: |
-        for g in {{ sudo_groups.stdout_lines | join(' ') }}
-        do
-          echo "Group: $g"
-          getent group "$g"
-          echo
-        done
+        getent group "{{ item }}" | awk -F: '{print $4}'
       args:
         executable: /bin/bash
-      register: group_members
+      loop: "{{ sudo_groups.stdout_lines }}"
+      register: group_members_raw
       changed_when: false
+      failed_when: false
       when: sudo_groups.stdout != ""
 
     #################################################################
-    # Detect NOPASSWD
+    # Write structured per-host JSON (inline content - no external
+    # .j2 template file needed)
     #################################################################
 
-    - name: Find NOPASSWD entries
-      shell: |
-        grep -RH "NOPASSWD" /etc/sudoers /etc/sudoers.d 2>/dev/null || true
-      register: nopasswd_entries
-      changed_when: false
-
-    #################################################################
-    # Build report
-    #################################################################
-
-    - name: Create audit report
+    - name: Write per-host JSON data file
       delegate_to: localhost
       become: false
       copy:
-        dest: "{{ local_report_dir }}/{{ inventory_hostname }}.txt"
+        dest: "{{ local_json_dir }}/{{ inventory_hostname }}.json"
         mode: "0644"
         content: |
-          ===========================================================
-          SUDO AUDIT REPORT
-          ===========================================================
-
-          Hostname       : {{ ansible_hostname }}
-          FQDN           : {{ ansible_fqdn }}
-          Inventory Name : {{ inventory_hostname }}
-          Environment    : {{ group_names | join(', ') }}
-
-          OS             : {{ ansible_distribution }} {{ ansible_distribution_version }}
-          Kernel         : {{ ansible_kernel }}
-
-          ===========================================================
-          visudo Validation
-          ===========================================================
-
-          Return Code : {{ visudo_check.rc }}
-
-          {{ visudo_check.stdout }}
-
-          {{ visudo_check.stderr }}
-
-          ===========================================================
-          /etc/sudoers
-          ===========================================================
-
-          {{ sudoers_file.stdout }}
-
-          ===========================================================
-          /etc/sudoers.d
-          ===========================================================
-
-          {% for item in sudoers_d_contents.results %}
-          {{ item.stdout }}
-
+          {
+            "hostname": "{{ ansible_hostname }}",
+            "fqdn": "{{ ansible_fqdn }}",
+            "inventory_hostname": "{{ inventory_hostname }}",
+            "environment": "{{ group_names | join(', ') }}",
+            "os": "{{ ansible_distribution }} {{ ansible_distribution_version }}",
+            "direct_users": {{ sudo_users.stdout_lines | default([]) | to_json }},
+            "sudo_groups": [
+          {% for result in group_members_raw.results | default([]) %}
+              {
+                "name": "{{ result.item }}",
+                "members": {{ (result.stdout | default('')).split(',') | map('trim') | reject('equalto', '') | list | to_json }}
+              }{{ "," if not loop.last else "" }}
           {% endfor %}
-
-          ===========================================================
-          Direct User Entries
-          ===========================================================
-
-          {% if sudo_users.stdout %}
-          {{ sudo_users.stdout }}
-          {% else %}
-          None
-          {% endif %}
-
-          ===========================================================
-          Sudo Groups
-          ===========================================================
-
-          {% if sudo_groups.stdout %}
-          {{ sudo_groups.stdout }}
-          {% else %}
-          None
-          {% endif %}
-
-          ===========================================================
-          Members of Sudo Groups
-          ===========================================================
-
-          {% if group_members is defined %}
-          {{ group_members.stdout }}
-          {% else %}
-          None
-          {% endif %}
-
-          ===========================================================
-          NOPASSWD Entries
-          ===========================================================
-
-          {% if nopasswd_entries.stdout %}
-          {{ nopasswd_entries.stdout }}
-          {% else %}
-          None
-          {% endif %}
+            ]
+          }
 
     #################################################################
     # Summary
@@ -206,6 +115,148 @@
       debug:
         msg:
           - "Host: {{ inventory_hostname }}"
-          - "Environment: {{ group_names | join(', ') }}"
           - "Direct Users: {{ sudo_users.stdout_lines | default([]) }}"
           - "Sudo Groups: {{ sudo_groups.stdout_lines | default([]) }}"
+
+#################################################################
+# Final play: write out the Excel-builder script, run it, clean up.
+# No external .py file needed - the script is embedded below.
+#################################################################
+
+- name: Generate consolidated Excel report
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+
+  vars:
+    local_report_dir: "./sudoers_audit_reports"
+    local_json_dir: "{{ local_report_dir }}/json"
+    excel_output_file: "{{ local_report_dir }}/sudo_audit_report.xlsx"
+    excel_script_path: "{{ local_report_dir }}/.generate_excel_report.py"
+
+  tasks:
+
+    - name: Ensure openpyxl is available on the control node
+      pip:
+        name: openpyxl
+        state: present
+      ignore_errors: true
+
+    - name: Write the embedded Excel-builder script
+      copy:
+        dest: "{{ excel_script_path }}"
+        mode: "0755"
+        content: |
+          #!/usr/bin/env python3
+          import json
+          import sys
+          from pathlib import Path
+          from openpyxl import Workbook
+          from openpyxl.styles import Font, PatternFill, Alignment
+          from openpyxl.utils import get_column_letter
+
+
+          def load_host_data(json_dir):
+              hosts = []
+              json_path = Path(json_dir)
+              if not json_path.exists():
+                  raise FileNotFoundError(f"JSON directory not found: {json_dir}")
+              for json_file in sorted(json_path.glob("*.json")):
+                  try:
+                      with open(json_file, "r") as f:
+                          hosts.append(json.load(f))
+                  except (json.JSONDecodeError, OSError) as exc:
+                      print(f"WARNING: skipping {json_file.name}: {exc}", file=sys.stderr)
+              return hosts
+
+
+          def style_header(ws, row=1):
+              header_fill = PatternFill(start_color="305496", end_color="305496", fill_type="solid")
+              header_font = Font(bold=True, color="FFFFFF")
+              for cell in ws[row]:
+                  cell.fill = header_fill
+                  cell.font = header_font
+                  cell.alignment = Alignment(horizontal="left", vertical="center")
+              ws.freeze_panes = "A2"
+
+
+          def autosize_columns(ws):
+              for col_cells in ws.columns:
+                  length = max((len(str(cell.value)) if cell.value is not None else 0) for cell in col_cells)
+                  col_letter = get_column_letter(col_cells[0].column)
+                  ws.column_dimensions[col_letter].width = min(max(length + 2, 12), 60)
+
+
+          def build_workbook(hosts, output_file):
+              if not hosts:
+                  raise ValueError("No host JSON data found - nothing to write.")
+
+              wb = Workbook()
+
+              ws_users = wb.active
+              ws_users.title = "Direct Users"
+              ws_users.append(["Hostname", "Environment", "OS", "Sudo User"])
+              for host in hosts:
+                  users = host.get("direct_users") or []
+                  if not users:
+                      ws_users.append([host["hostname"], host["environment"], host["os"], "(none)"])
+                  for user in users:
+                      ws_users.append([host["hostname"], host["environment"], host["os"], user])
+              style_header(ws_users)
+              autosize_columns(ws_users)
+
+              ws_groups = wb.create_sheet("Sudo Groups")
+              ws_groups.append(["Hostname", "Environment", "OS", "Sudo Group", "Group Members"])
+              for host in hosts:
+                  groups = host.get("sudo_groups") or []
+                  if not groups:
+                      ws_groups.append([host["hostname"], host["environment"], host["os"], "(none)", ""])
+                  for group in groups:
+                      members = ", ".join(group.get("members") or [])
+                      ws_groups.append([
+                          host["hostname"], host["environment"], host["os"],
+                          group.get("name", ""), members or "(no members)",
+                      ])
+              style_header(ws_groups)
+              autosize_columns(ws_groups)
+
+              ws_summary = wb.create_sheet("Summary")
+              ws_summary.append(["Hostname", "Environment", "OS", "# Direct Users", "# Sudo Groups"])
+              for host in hosts:
+                  ws_summary.append([
+                      host["hostname"], host["environment"], host["os"],
+                      len(host.get("direct_users") or []), len(host.get("sudo_groups") or []),
+                  ])
+              style_header(ws_summary)
+              autosize_columns(ws_summary)
+
+              wb.save(output_file)
+              print(f"Excel report written to: {output_file}")
+              print(f"Hosts processed: {len(hosts)}")
+
+
+          def main():
+              if len(sys.argv) != 3:
+                  print("Usage: script.py <json_dir> <output_xlsx>", file=sys.stderr)
+                  sys.exit(1)
+              hosts = load_host_data(sys.argv[1])
+              build_workbook(hosts, sys.argv[2])
+
+
+          if __name__ == "__main__":
+              main()
+
+    - name: Build Excel workbook from per-host JSON files
+      command: "python3 {{ excel_script_path }} {{ local_json_dir }} {{ excel_output_file }}"
+      register: excel_build
+      changed_when: true
+
+    - name: Show Excel build result
+      debug:
+        var: excel_build.stdout_lines
+
+    - name: Clean up the temporary Excel-builder script
+      file:
+        path: "{{ excel_script_path }}"
+        state: absent
