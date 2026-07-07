@@ -10,7 +10,7 @@
 #   ./sudoers_audit_reports/sudo_audit_report.xlsx   (final Excel report)
 
 - name: Audit sudo users and groups on Linux servers
-  hosts: ldap
+  hosts: linux_servers
   become: true
   gather_facts: true
 
@@ -151,6 +151,22 @@
         name: openpyxl
         state: present
       ignore_errors: true
+
+    - name: Check whether any per-host JSON files were produced
+      find:
+        paths: "{{ local_json_dir }}"
+        patterns: "*.json"
+      register: found_json_files
+
+    - name: Fail early with a clear message if no host data was collected
+      fail:
+        msg: >-
+          No per-host JSON files found in {{ local_json_dir }}.
+          This means the first play (hosts: linux_servers) matched zero hosts -
+          check that 'linux_servers' is a real group in your inventory
+          (run 'ansible-inventory --graph' to see actual group names),
+          and update 'hosts: linux_servers' in this playbook to match if needed.
+      when: found_json_files.matched == 0
 
     - name: Write the embedded Excel-builder script
       copy:
