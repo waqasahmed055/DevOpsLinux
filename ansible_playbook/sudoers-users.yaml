@@ -10,7 +10,7 @@
 #   ./sudoers_audit_reports/sudo_audit_report.xlsx   (final Excel report)
 
 - name: Audit sudo users and groups on Linux servers
-  hosts: linux_servers
+  hosts: ldap
   become: true
   gather_facts: true
 
@@ -136,6 +136,15 @@
     excel_script_path: "{{ local_report_dir }}/.generate_excel_report.py"
 
   tasks:
+
+    - name: Ensure local report/json directories exist
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - "{{ local_report_dir }}"
+        - "{{ local_json_dir }}"
 
     - name: Ensure openpyxl is available on the control node
       pip:
