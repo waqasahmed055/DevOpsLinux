@@ -1,0 +1,54 @@
+loki.write "default" {
+  endpoint {
+    url = "http://your-loki-server:3100/loki/api/v1/push"  # or HTTPS + basic auth
+  }
+}
+
+loki.source.file "degreeworks" {
+  targets = [
+    # Startup logs
+    "/var/log/dw_start_*.log",
+
+    # Service logs (adjust paths)
+    "/degreeworks/APIServices/logs/*.log",
+    "/degreeworks/Composer/logs/*.log",
+    "/degreeworks/Controller/logs/*.log",
+    # ... add others
+    "/degreeworks/*/logs/*.log",
+    "/degreeworks/*/*.out",
+  ]
+
+  forward_to = [loki.process.degreeworks.receiver]
+}
+
+loki.process "degreeworks" {
+  stage.match {
+    selector = "{job=\"degreeworks\"}"
+    stages = [
+      stage.regex {
+        expression = `(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) \[(?P<level>\w+)\] (?P<msg>.*)`
+      },
+      stage.labels {
+        values = {
+          level = "level",
+        }
+      },
+      stage.timestamp {
+        source = "timestamp"
+        format = "2006-01-02 15:04:05"
+      },
+    ]
+  }
+
+  forward_to = [loki.write.default.receiver]
+}
+
+// Add labels
+loki.source.file "degreeworks" {
+  ...
+  labels = {
+    job = "degreeworks",
+    host = "your-hostname",
+    environment = "production",
+  }
+}
