@@ -1,54 +1,38 @@
+livedebugging {
+  enabled = false
+}
+
+local.file_match "dw_app_logs" {
+  path_targets = [
+    {__path__ = "/degreeworks/APIServices/*.log",        job = "degreeworks", service = "APIServices"},
+    {__path__ = "/degreeworks/Composer/*.log",           job = "degreeworks", service = "Composer"},
+    {__path__ = "/degreeworks/Controller/*.log",         job = "degreeworks", service = "Controller"},
+    {__path__ = "/degreeworks/RespDashboard/*.log",      job = "degreeworks", service = "RespDashboard"},
+    {__path__ = "/degreeworks/TransferEquiv/*.log",      job = "degreeworks", service = "TransferEquiv"},
+    {__path__ = "/degreeworks/TransferEquivAdmin/*.log", job = "degreeworks", service = "TransferEquivAdmin"},
+    {__path__ = "/degreeworks/TransitUI/*.log",          job = "degreeworks", service = "TransitUI"},
+    {__path__ = "/var/log/dw_start_*.log",               job = "degreeworks", service = "start_script"},
+  ]
+  sync_period = "10s"
+}
+
+loki.source.file "dw_app_logs" {
+  targets       = local.file_match.dw_app_logs.targets
+  forward_to    = [loki.process.dw_app_logs.receiver]
+  tail_from_end = true
+}
+
+loki.process "dw_app_logs" {
+  forward_to = [loki.write.default.receiver]
+
+  stage.multiline {
+    firstline     = "^\\d{4}-\\d{2}-\\d{2}[ T]\\d{2}:\\d{2}:\\d{2}"
+    max_wait_time = "3s"
+  }
+}
+
 loki.write "default" {
   endpoint {
-    url = "http://your-loki-server:3100/loki/api/v1/push"  # or HTTPS + basic auth
-  }
-}
-
-loki.source.file "degreeworks" {
-  targets = [
-    # Startup logs
-    "/var/log/dw_start_*.log",
-
-    # Service logs (adjust paths)
-    "/degreeworks/APIServices/logs/*.log",
-    "/degreeworks/Composer/logs/*.log",
-    "/degreeworks/Controller/logs/*.log",
-    # ... add others
-    "/degreeworks/*/logs/*.log",
-    "/degreeworks/*/*.out",
-  ]
-
-  forward_to = [loki.process.degreeworks.receiver]
-}
-
-loki.process "degreeworks" {
-  stage.match {
-    selector = "{job=\"degreeworks\"}"
-    stages = [
-      stage.regex {
-        expression = `(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) \[(?P<level>\w+)\] (?P<msg>.*)`
-      },
-      stage.labels {
-        values = {
-          level = "level",
-        }
-      },
-      stage.timestamp {
-        source = "timestamp"
-        format = "2006-01-02 15:04:05"
-      },
-    ]
-  }
-
-  forward_to = [loki.write.default.receiver]
-}
-
-// Add labels
-loki.source.file "degreeworks" {
-  ...
-  labels = {
-    job = "degreeworks",
-    host = "your-hostname",
-    environment = "production",
+    url = "http://<loki-host>:3100/loki/api/v1/push"
   }
 }
