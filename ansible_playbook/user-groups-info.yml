@@ -1,4 +1,31 @@
 ---
+---
+- name: Collect users and groups from sudoers files
+  hosts: all
+  become: yes
+  gather_facts: no          # not strictly needed, speeds up execution
+
+  tasks:
+    - name: Extract sudoers entries (users and groups)
+      ansible.builtin.shell: |
+        for f in /etc/sudoers /etc/sudoers.d/*; do
+          [ -f "$f" ] || continue
+          grep -Ehv '^\s*$|^\s*#|^\s*Defaults' "$f"
+        done | grep -Eo '^[%]?[a-zA-Z0-9_-]+' | sort -u
+      register: sudoers_raw
+      changed_when: false
+
+    - name: Separate users and groups
+      set_fact:
+        sudo_users: "{{ sudoers_raw.stdout_lines | reject('match', '^%') | list }}"
+        sudo_groups: "{{ sudoers_raw.stdout_lines | select('match', '^%') | map('regex_replace', '^%', '') | list }}"
+
+    - name: Show collected information
+      debug:
+        msg:
+          - "Sudo users: {{ sudo_users }}"
+          - "Sudo groups: {{ sudo_groups }}"
+---
 - name: Collect users and groups from sudoers files
   hosts: all
   become: yes
