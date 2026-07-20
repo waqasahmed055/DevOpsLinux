@@ -2,11 +2,11 @@
 - name: Collect users and groups from sudoers files
   hosts: all
   become: yes
-  gather_facts: no          # not strictly needed, speeds up execution
+  gather_facts: no
 
   tasks:
-    - name: Extract sudoers entries (users and groups)
-      ansible.builtin.shell: |
+    - name: Extract sudoers entries
+      shell: |
         for f in /etc/sudoers /etc/sudoers.d/*; do
           [ -f "$f" ] || continue
           grep -Ehv '^\s*$|^\s*#|^\s*Defaults' "$f"
@@ -17,10 +17,23 @@
     - name: Separate users and groups
       set_fact:
         sudo_users: "{{ sudoers_raw.stdout_lines | reject('match', '^%') | list }}"
-        sudo_groups: "{{ sudoers_raw.stdout_lines | select('match', '^%') | map('regex_replace', '^%', '') | list }}"
+        sudo_groups: "{{ sudoers_raw.stdout_lines | select('match', '^%') | map('regex_replace','^%','') | list }}"
 
-    - name: Show collected information
-      debug:
-        msg:
-          - "Sudo users: {{ sudo_users }}"
-          - "Sudo groups: {{ sudo_groups }}"
+    - name: Create CSV header
+      delegate_to: localhost
+      become: false
+      run_once: true
+      copy:
+        dest: ./sudo_report.csv
+        content: "Hostname,Sudo Users,Sudo Groups\n"
+
+    - name: Append host information
+      delegate_to: localhost
+      become: false
+      lineinfile:
+        path: ./sudo_report.csv
+        insertafter: EOF
+        line: >-
+          {{ inventory_hostname }},
+          "{{ sudo_users | join(', ') }}",
+          "{{ sudo_groups | join(', ') }}"
